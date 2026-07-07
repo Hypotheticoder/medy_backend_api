@@ -18,8 +18,11 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from db import Base
+from db import Base, SQLALCHEMY_DATABASE_URL
 import models
+
+# Set the sqlalchemy.url from db.py
+config.set_main_option("sqlalchemy.url", SQLALCHEMY_DATABASE_URL)
 
 # add your model's MetaData object here
 # for 'autogenerate' support
