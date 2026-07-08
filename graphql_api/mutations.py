@@ -1,10 +1,13 @@
 import strawberry
+import uuid
 from strawberry.types import Info
+from strawberry.scalars import JSON
 from typing import Optional
 
 from graphql_api.types.cart import CartType
 from models.cart import Cart
 from models.medicine import Medicine
+from models.customer import CustomerUser
 
 @strawberry.type
 class Mutation:
@@ -110,3 +113,70 @@ class Mutation:
         db.commit()
         db.refresh(cart)
         return cart
+
+    @strawberry.mutation
+    def add_saved_address(
+        self, 
+        info: Info, 
+        customer_id: str, 
+        address_type: str, 
+        address_1: str, 
+        street_address: str, 
+        latitude: float, 
+        longitude: float,
+        is_default: bool = False
+    ) -> JSON:
+        """Adds a new saved address to the customer's profile."""
+        db = info.context["db"]
+        customer = db.query(CustomerUser).filter(CustomerUser.customer_id == customer_id).first()
+        if not customer:
+            raise Exception("Customer not found")
+            
+        addresses = customer.saved_addresses.copy() if customer.saved_addresses else []
+        
+        new_address = {
+            "address_id": str(uuid.uuid4()),
+            "address_type": address_type,
+            "address_1": address_1,
+            "street_address": street_address,
+            "latitude": latitude,
+            "longitude": longitude,
+            "is_default": is_default
+        }
+        
+        if is_default:
+            for addr in addresses:
+                addr["is_default"] = False
+                
+        addresses.append(new_address)
+        customer.saved_addresses = addresses
+        
+        db.commit()
+        db.refresh(customer)
+        
+        return new_address
+
+    @strawberry.mutation
+    def delete_saved_address(
+        self,
+        info: Info,
+        customer_id: str,
+        address_id: str
+    ) -> bool:
+        """Deletes a saved address from the customer's profile."""
+        db = info.context["db"]
+        customer = db.query(CustomerUser).filter(CustomerUser.customer_id == customer_id).first()
+        if not customer:
+            raise Exception("Customer not found")
+            
+        if not customer.saved_addresses:
+            return False
+            
+        initial_length = len(customer.saved_addresses)
+        customer.saved_addresses = [addr for addr in customer.saved_addresses if addr.get("address_id") != address_id]
+        
+        if len(customer.saved_addresses) == initial_length:
+            return False # Nothing was deleted
+            
+        db.commit()
+        return True

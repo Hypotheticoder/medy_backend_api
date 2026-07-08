@@ -1,5 +1,6 @@
-from sqlalchemy import Column, String, DateTime
+from sqlalchemy import Column, String, DateTime, JSON
 from sqlalchemy.sql import func
+from sqlalchemy.ext.mutable import MutableList
 from db import Base
 import uuid
 
@@ -16,6 +17,7 @@ class CustomerUser(Base):
     email = Column(String, unique=True, nullable=True)
     profile_picture = Column(String, nullable=True)
     status = Column(String, default="active", nullable=False) # active, suspended, deleted
+    saved_addresses = Column(MutableList.as_mutable(JSON), nullable=False, default=list)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
 
