@@ -22,8 +22,7 @@ async def get_graphql_context(db: Session = Depends(get_db)):
 # You will import this `graphql_app` in your main.py and mount it!
 graphql_app = GraphQLRouter(
     schema,
-    context_getter=get_graphql_context,
-    graphiql=True # Enables the awesome GraphQL visual testing playground in your browser!
+    context_getter=get_graphql_context
 )
 
 """
