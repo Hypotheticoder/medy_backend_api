@@ -9,6 +9,7 @@ from routes.medicine import router as medicine_router
 from routes.order import router as order_router
 from routes.websockets import router as websocket_router
 from routes.auth import router as auth_router
+from routes.pharma_shop import router as pharma_shop_router
 
 # GraphQL Router
 from graphql_api.router import graphql_app
@@ -32,6 +33,7 @@ app.add_middleware(
 
 # Mount REST Routes
 app.include_router(auth_router)
+app.include_router(pharma_shop_router)
 app.include_router(medicine_router)
 app.include_router(order_router)
 app.include_router(websocket_router)

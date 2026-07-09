@@ -35,6 +35,7 @@ async def place_order(payload: dict, db: Session = Depends(get_db)):
         delivery_lng=payload["delivery_lng"],
         is_emergency=payload.get("is_emergency", False),
         delivery_instructions=payload.get("instructions", ""),
+        payment_mode=payload.get("payment_mode", "cod"),
         order_status="bidding" # TIMER STARTS NOW
     )
     db.add(new_order)
