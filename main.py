@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
 
 # Database Setup
 from db import engine, Base
@@ -20,7 +22,11 @@ import models
 Base.metadata.create_all(bind=engine)
 
 # Initialize FastAPI App
+os.makedirs("uploads", exist_ok=True)
 app = FastAPI(title="Medy Backend API")
+
+# Mount uploads directory
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Configure CORS (Cross-Origin Resource Sharing)
 app.add_middleware(

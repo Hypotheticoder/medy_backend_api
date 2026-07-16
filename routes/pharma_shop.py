@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 import logging
+import os
+import shutil
 
 from utils.security import get_password_hash
 from db import get_db
@@ -88,3 +90,51 @@ async def admin_approve_shop(shop_id: str, db: Session = Depends(get_db)):
     
     db.commit()
     return {"status": "success", "message": f"Shop {shop.shop_name} is now live and verified!"}
+
+@router.post("/{shop_id}/upload-documents")
+async def upload_shop_documents(
+    shop_id: str,
+    shop_image: UploadFile = File(None),
+    drug_license_upload: UploadFile = File(None),
+    pan_card_upload: UploadFile = File(None),
+    registration_certificate_upload: UploadFile = File(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload files for a specific shop. Files are saved to:
+    uploads/<shop_name>/<field_name>/<filename>
+    """
+    shop = db.query(PharmaShopUser).filter(PharmaShopUser.shop_id == shop_id).first()
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found.")
+
+    shop_name_safe = "".join(c if c.isalnum() else "_" for c in shop.shop_name)
+    base_upload_path = os.path.join("uploads", shop_name_safe)
+    os.makedirs(base_upload_path, exist_ok=True)
+
+    def save_upload_file(upload_file: UploadFile, field_name: str) -> str:
+        field_path = os.path.join(base_upload_path, field_name)
+        os.makedirs(field_path, exist_ok=True)
+        file_path = os.path.join(field_path, upload_file.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(upload_file.file, buffer)
+        # Return URL path
+        return f"/uploads/{shop_name_safe}/{field_name}/{upload_file.filename}"
+
+    updates = {}
+    if shop_image:
+        updates["shop_image"] = save_upload_file(shop_image, "shop_image")
+    if drug_license_upload:
+        updates["drug_license_upload"] = save_upload_file(drug_license_upload, "drug_license_upload")
+    if pan_card_upload:
+        updates["pan_card_upload"] = save_upload_file(pan_card_upload, "pan_card_upload")
+    if registration_certificate_upload:
+        updates["registration_certificate_upload"] = save_upload_file(registration_certificate_upload, "registration_certificate_upload")
+
+    if updates:
+        for key, value in updates.items():
+            setattr(shop, key, value)
+        db.commit()
+        db.refresh(shop)
+
+    return {"status": "success", "message": "Documents uploaded successfully", "updates": updates}
