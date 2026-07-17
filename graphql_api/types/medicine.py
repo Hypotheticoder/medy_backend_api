@@ -19,3 +19,12 @@ class MedicineType:
     discount_percent: Optional[float]
     final_selling_price: float
     prescription_required: bool
+
+    @strawberry.field
+    def rx_required(self) -> bool:
+        return self.prescription_required
+
+    @strawberry.field
+    def available_stock(self) -> int:
+        # Mock stock value since DB model lacks global stock tracking
+        return 100

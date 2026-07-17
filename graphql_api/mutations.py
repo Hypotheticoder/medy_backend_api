@@ -5,6 +5,7 @@ from strawberry.scalars import JSON
 from typing import Optional
 
 from graphql_api.types.cart import CartType
+from graphql_api.types.medicine import MedicineType
 from models.cart import Cart
 from models.medicine import Medicine
 from models.customer import CustomerUser
@@ -180,3 +181,38 @@ class Mutation:
             
         db.commit()
         return True
+
+    @strawberry.mutation
+    def update_medicine(
+        self,
+        info: Info,
+        medicine_id: str,
+        medicine_name: Optional[str] = None,
+        medicine_category: Optional[str] = None,
+        pack_size: Optional[str] = None,
+        mrp: Optional[float] = None,
+        final_selling_price: Optional[float] = None,
+        prescription_required: Optional[bool] = None,
+    ) -> MedicineType:
+        """Updates a medicine in the global catalog."""
+        db = info.context["db"]
+        medicine = db.query(Medicine).filter(Medicine.medicine_id == medicine_id).first()
+        if not medicine:
+            raise Exception("Medicine not found")
+            
+        if medicine_name is not None:
+            medicine.medicine_name = medicine_name
+        if medicine_category is not None:
+            medicine.medicine_category = medicine_category
+        if pack_size is not None:
+            medicine.pack_size = pack_size
+        if mrp is not None:
+            medicine.mrp = mrp
+        if final_selling_price is not None:
+            medicine.final_selling_price = final_selling_price
+        if prescription_required is not None:
+            medicine.prescription_required = prescription_required
+            
+        db.commit()
+        db.refresh(medicine)
+        return medicine
