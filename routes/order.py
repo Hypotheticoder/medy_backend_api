@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
 from sqlalchemy.orm import Session
 import requests
 import logging
 import json
+import os
+import shutil
 
 from db import get_db
 from models.order import Order, generate_order_id
@@ -36,6 +38,14 @@ async def place_order(payload: dict, db: Session = Depends(get_db)):
         is_emergency=payload.get("is_emergency", False),
         delivery_instructions=payload.get("instructions", ""),
         payment_mode=payload.get("payment_mode", "cod"),
+        order_type=payload.get("order_type", "cart"),
+        prescription_url=payload.get("prescription_url", None),
+        items=payload.get("items", []),
+        item_total=payload.get("item_total", 0.0),
+        platform_fee=payload.get("platform_fee", 0.0),
+        delivery_fee=payload.get("delivery_fee", 0.0),
+        taxes=payload.get("taxes", 0.0),
+        total_bill_amount=payload.get("total_bill_amount", 0.0),
         order_status="bidding" # TIMER STARTS NOW
     )
     db.add(new_order)
@@ -44,6 +54,28 @@ async def place_order(payload: dict, db: Session = Depends(get_db)):
     
     # (Background Task): Query Postgres with PostGIS/Haversine to find shops within 5km
     # and push a "NEW_ORDER" event to their WebSocket channels via Redis.
+    # For now, we broadcast to all connected shops on the "shop_orders" channel.
+    import asyncio
+    
+    async def publish_new_order():
+        await redis_manager.connect()
+        order_payload = {
+            "order_id": new_order.order_id,
+            "customer_id": new_order.customer_id,
+            "delivery_address": new_order.delivery_address,
+            "items": new_order.items,
+            "item_total": new_order.item_total,
+            "order_type": new_order.order_type,
+            "is_emergency": new_order.is_emergency
+        }
+        await redis_manager.redis_client.publish("shop_orders", json.dumps(order_payload))
+    
+    # Fire and forget the publish event
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(publish_new_order())
+    except RuntimeError:
+        asyncio.run(publish_new_order())
     
     return {"status": "success", "order_id": new_order.order_id, "message": "Auction started"}
 
@@ -171,3 +203,54 @@ def dispatch_order_to_caby(order_id: str, db: Session = Depends(get_db)):
     except requests.exceptions.RequestException as e:
         logger.error(f"Caby integration failed: {e}")
         raise HTTPException(status_code=502, detail="Failed to dispatch driver.")
+
+@router.post("/upload-prescription")
+async def upload_prescription(
+    customer_id: str,
+    prescription: UploadFile = File(...)
+):
+    """Uploads a customer's prescription and returns the URL."""
+    try:
+        base_upload_path = os.path.join("uploads", "prescriptions", customer_id)
+        os.makedirs(base_upload_path, exist_ok=True)
+        
+        file_path = os.path.join(base_upload_path, prescription.filename)
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(prescription.file, buffer)
+            
+        return {
+            "status": "success",
+            "prescription_url": f"/uploads/prescriptions/{customer_id}/{prescription.filename}"
+        }
+    except Exception as e:
+        logger.error(f"Failed to upload prescription: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload prescription")
+
+@router.post("/{order_id}/cancel")
+async def cancel_order(order_id: str, db: Session = Depends(get_db)):
+    """Customer cancels an active order."""
+    order = db.query(Order).filter(Order.order_id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+        
+    if order.order_status not in ["bidding", "checkout_pending"]:
+        raise HTTPException(status_code=400, detail="Order cannot be cancelled at this stage")
+        
+    order.order_status = "cancelled"
+    db.commit()
+    
+    # Broadcast cancellation if it was in bidding
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        loop.create_task(
+            redis_manager.redis_client.publish(
+                f"live_bids:{order_id}", 
+                json.dumps({"type": "AUCTION_CLOSED"})
+            )
+        )
+    except Exception as e:
+        logger.error(f"Failed to broadcast cancellation: {e}")
+        
+    return {"status": "success", "message": "Order cancelled successfully"}

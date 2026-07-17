@@ -95,6 +95,22 @@ async def shop_bidding_endpoint(websocket: WebSocket, shop_id: str):
     await manager.connect(websocket, manager.active_shops, shop_id)
     await redis_manager.connect()
 
+    pubsub = redis_manager.redis_client.pubsub()
+    await pubsub.subscribe("shop_orders")
+
+    async def redis_listener():
+        try:
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    order_data = json.loads(message["data"])
+                    # In a real app, you would filter by distance using PostGIS here
+                    # For now, broadcast to all connected shops
+                    await websocket.send_json({"type": "NEW_ORDER", "data": order_data})
+        except asyncio.CancelledError:
+            await pubsub.unsubscribe("shop_orders")
+
+    listener_task = asyncio.create_task(redis_listener())
+
     try:
         while True:
             raw_data = await websocket.receive_json()
@@ -116,6 +132,7 @@ async def shop_bidding_endpoint(websocket: WebSocket, shop_id: str):
 
     except WebSocketDisconnect:
         manager.disconnect(websocket, manager.active_shops, shop_id)
+        listener_task.cancel()
 
 @router.websocket("/tracking/customer/{order_id}")
 async def customer_tracking_endpoint(websocket: WebSocket, order_id: str):
