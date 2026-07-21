@@ -5,6 +5,11 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import redis.asyncio as aioredis
 from typing import Dict, Set
 
+from db import SessionLocal
+from models.order_bid import OrderBid, generate_bid_id
+from models.order import Order
+from models.pharma_shop import PharmaShopUser
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ws", tags=["Real-Time Engine"])
@@ -105,7 +110,7 @@ async def shop_bidding_endpoint(websocket: WebSocket, shop_id: str):
                     order_data = json.loads(message["data"])
                     # In a real app, you would filter by distance using PostGIS here
                     # For now, broadcast to all connected shops
-                    await websocket.send_json({"type": "NEW_ORDER", "data": order_data})
+                    await websocket.send_json({"type": "new_order_broadcast", "order": order_data})
         except asyncio.CancelledError:
             await pubsub.unsubscribe("shop_orders")
 
@@ -114,21 +119,135 @@ async def shop_bidding_endpoint(websocket: WebSocket, shop_id: str):
     try:
         while True:
             raw_data = await websocket.receive_json()
-            action = raw_data.get("action")
+            action = raw_data.get("action") or raw_data.get("type")
             
-            if action == "SUBMIT_BID":
+            if action == "get_broadcast_orders":
+                db = SessionLocal()
+                try:
+                    
+                    # Exclude orders this shop has already bid on
+                    bidded_orders = db.query(OrderBid.order_id).filter(OrderBid.shop_id == shop_id).all()
+                    bidded_order_ids = [b[0] for b in bidded_orders]
+                    
+                    query = db.query(Order).filter(Order.order_status == "bidding")
+                    if bidded_order_ids:
+                        query = query.filter(~Order.order_id.in_(bidded_order_ids))
+                        
+                    orders = query.order_by(Order.created_at.desc()).limit(20).all()
+                    
+                    orders_data = []
+                    for o in orders:
+                        orders_data.append({
+                            "order_id": o.order_id,
+                            "customer_id": o.customer_id,
+                            "receiver_name": o.receiver_name,
+                            "receiver_phone": o.receiver_phone,
+                            "delivery_address": o.delivery_address,
+                            "delivery_lat": o.delivery_lat,
+                            "delivery_lng": o.delivery_lng,
+                            "items": o.items,
+                            "item_total": o.item_total,
+                            "order_type": o.order_type,
+                            "is_emergency": o.is_emergency,
+                            "platform_fee": o.platform_fee,
+                            "delivery_fee": o.delivery_fee,
+                            "taxes": o.taxes,
+                            "total_bill_amount": o.total_bill_amount,
+                            "created_at": o.created_at.isoformat() if o.created_at else None
+                        })
+                    await websocket.send_json({"type": "pending_broadcast_orders", "data": orders_data})
+                except Exception as e:
+                    logger.error(f"Error fetching broadcast orders: {e}")
+                finally:
+                    db.close()
+
+            elif action == "get_shop_orders":
+                page = raw_data.get("page", 1)
+                limit = raw_data.get("limit", 20)
+                status = raw_data.get("status")
+                
+                db = SessionLocal()
+                try:
+                    query = db.query(Order).filter(Order.shop_id == shop_id)
+                    if status:
+                        query = query.filter(Order.order_status == status)
+                        
+                    orders = query.order_by(Order.created_at.desc()).offset((page - 1) * limit).limit(limit).all()
+                    
+                    orders_data = []
+                    for o in orders:
+                        orders_data.append({
+                            "order_id": o.order_id,
+                            "customer_id": o.customer_id,
+                            "receiver_name": o.receiver_name,
+                            "receiver_phone": o.receiver_phone,
+                            "delivery_address": o.delivery_address,
+                            "delivery_lat": o.delivery_lat,
+                            "delivery_lng": o.delivery_lng,
+                            "items": o.items,
+                            "item_total": o.item_total,
+                            "order_type": o.order_type,
+                            "is_emergency": o.is_emergency,
+                            "order_status": o.order_status,
+                            "platform_fee": o.platform_fee,
+                            "delivery_fee": o.delivery_fee,
+                            "taxes": o.taxes,
+                            "total_bill_amount": o.total_bill_amount,
+                            "payment_method": o.payment_mode,
+                            "created_at": o.created_at.isoformat() if o.created_at else None
+                        })
+                    await websocket.send_json({"type": "orders_list", "data": orders_data})
+                except Exception as e:
+                    logger.error(f"Error fetching shop orders: {e}")
+                finally:
+                    db.close()
+
+            elif action == "SUBMIT_BID":
                 order_id = raw_data.get("order_id")
-                bid_payload = {
-                    "shop_id": shop_id,
-                    "order_id": order_id,
-                    "bid_type": raw_data.get("bid_type"), 
-                    "proposed_items": raw_data.get("proposed_items"),
-                    "total_bid_price": raw_data.get("total_bid_price"),
-                    "estimated_ready_time_mins": raw_data.get("estimated_ready_time_mins")
-                }
-                # Publish the bid to the customer
-                await redis_manager.publish_bid(order_id, bid_payload)
-                await websocket.send_json({"type": "BID_RECEIVED", "status": "success"})
+                new_bid_id = generate_bid_id()
+                
+                # Save to Postgres Database
+                db = SessionLocal()
+                bid_payload = None
+                try:
+                    shop = db.query(PharmaShopUser).filter(PharmaShopUser.shop_id == shop_id).first()
+                    
+                    new_bid = OrderBid(
+                        bid_id=new_bid_id,
+                        order_id=order_id,
+                        shop_id=shop_id,
+                        proposed_items=raw_data.get("proposed_items", []),
+                        total_bid_price=raw_data.get("total_bid_price", 0.0),
+                    )
+                    db.add(new_bid)
+                    db.commit()
+                    
+                    bid_payload = {
+                        "quote_id": new_bid_id,
+                        "shop_id": shop_id,
+                        "order_id": order_id,
+                        "shop_name": shop.shop_name if shop else "Pharmacy",
+                        "shop_phone": shop.phone if shop else "",
+                        "shop_address": shop.address if shop else "",
+                        "shop_lat": shop.latitude if shop else None,
+                        "shop_lng": shop.longitude if shop else None,
+                        "items": raw_data.get("proposed_items", []),
+                        "item_total": raw_data.get("total_bid_price", 0.0),
+                        "total_bill_amount": raw_data.get("total_bid_price", 0.0),
+                        "status": "pending"
+                    }
+                except Exception as e:
+                    with open("bid_error.log", "a") as f:
+                        f.write(f"Failed to save bid to DB: {e}\n")
+                    logger.error(f"Failed to save bid to DB: {e}")
+                    db.rollback()
+                finally:
+                    db.close()
+
+                if bid_payload:
+                    # Publish the bid to the customer
+                    await redis_manager.publish_bid(order_id, bid_payload)
+                    await websocket.send_json({"type": "BID_RECEIVED", "status": "success"})
 
     except WebSocketDisconnect:
         manager.disconnect(websocket, manager.active_shops, shop_id)
