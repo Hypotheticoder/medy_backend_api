@@ -74,11 +74,18 @@ class Order(Base):
     accepted_at = Column(DateTime(timezone=True), nullable=True)
     delivered_at = Column(DateTime(timezone=True), nullable=True)
 
+    from sqlalchemy.orm import relationship
+    shop = relationship("PharmaShopUser", backref="orders", foreign_keys=[shop_id])
+
     def to_dict(self):
         return {
             "order_id": self.order_id,
             "customer_id": self.customer_id,
             "shop_id": self.shop_id,
+            "shop_name": self.shop.shop_name if self.shop else None,
+            "shop_phone": self.shop.phone if self.shop else None,
+            "shop_lat": self.shop.latitude if self.shop else None,
+            "shop_lng": self.shop.longitude if self.shop else None,
             "order_type": self.order_type,
             "order_status": self.order_status,
             "delivery_address": self.delivery_address,

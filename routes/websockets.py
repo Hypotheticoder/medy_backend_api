@@ -58,6 +58,19 @@ class ConnectionManager:
             room_dict[key].discard(websocket)
             if not room_dict[key]:
                 del room_dict[key]
+    async def send_shop_update(self, shop_id: str, data: dict):
+        if shop_id in self.active_shops:
+            dead_sockets = set()
+            for ws in self.active_shops[shop_id]:
+                try:
+                    await ws.send_json(data)
+                except Exception as e:
+                    logger.error(f"Failed to send update to shop {shop_id}: {e}")
+                    dead_sockets.add(ws)
+            for ws in dead_sockets:
+                self.active_shops[shop_id].discard(ws)
+            if not self.active_shops[shop_id]:
+                del self.active_shops[shop_id]
 
 manager = ConnectionManager()
 
@@ -102,17 +115,22 @@ async def shop_bidding_endpoint(websocket: WebSocket, shop_id: str):
 
     pubsub = redis_manager.redis_client.pubsub()
     await pubsub.subscribe("shop_orders")
+    await pubsub.subscribe(f"shop_channel_{shop_id}")
 
     async def redis_listener():
         try:
             async for message in pubsub.listen():
                 if message["type"] == "message":
-                    order_data = json.loads(message["data"])
-                    # In a real app, you would filter by distance using PostGIS here
-                    # For now, broadcast to all connected shops
-                    await websocket.send_json({"type": "new_order_broadcast", "order": order_data})
+                    data = json.loads(message["data"])
+                    if message["channel"] == "shop_orders":
+                        # Broadcast to all connected shops
+                        await websocket.send_json({"type": "new_order_broadcast", "order": data})
+                    elif message["channel"] == f"shop_channel_{shop_id}":
+                        # Specific update for this shop (e.g. order_updated)
+                        await websocket.send_json(data)
         except asyncio.CancelledError:
             await pubsub.unsubscribe("shop_orders")
+            await pubsub.unsubscribe(f"shop_channel_{shop_id}")
 
     listener_task = asyncio.create_task(redis_listener())
 

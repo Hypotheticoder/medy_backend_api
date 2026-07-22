@@ -3,7 +3,9 @@ from sqlalchemy.orm import Session
 import requests
 import logging
 import json
+# Global imports for CABY URL resolution
 import os
+
 import shutil
 
 from db import get_db
@@ -21,8 +23,9 @@ from routes.websockets import redis_manager # Updated to match your websockets f
 router = APIRouter(prefix="/api/rest/orders", tags=["Order Lifecycle"])
 logger = logging.getLogger(__name__)
 
-# CABY API details (Replace with your actual internal Caby URLs)
-CABY_BASE_URL = "https://appbackenddemo.naiyo24.com/customer_orders"
+# Dynamic fetch for CABY URL to support hot reloading .env
+def get_caby_url():
+    return os.getenv("CABY_BASE_URL", "https://appbackenddemo.naiyo24.com/customer_orders")
 
 @router.post("/place")
 async def place_order(payload: dict, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
@@ -106,13 +109,14 @@ async def accept_winning_bid(order_id: str, payload: dict, background_tasks: Bac
         # 2. Call Caby to get the exact delivery fare before checkout
         # We assume you have the Shop's lat/lng from the DB in a real scenario
         caby_fare_request = {
-            "service_type": "medicine",
+            "service_type": "parcel_bike",
             "distance_km": 5.0, # TODO: Calculate actual Haversine distance here between shop and delivery location
-            "is_parcel": False 
+            "is_parcel": True 
         }
         
         try:
-            caby_response = requests.post(f"{CABY_BASE_URL}/calculate-fare", json=caby_fare_request, timeout=3)
+            caby_url = get_caby_url()
+            caby_response = requests.post(f"{caby_url}/calculate-fare", json=caby_fare_request, timeout=3)
             caby_response.raise_for_status()
             fare_data = caby_response.json()
             
@@ -225,7 +229,7 @@ def dispatch_order_to_caby(order_id: str, db: Session = Depends(get_db)):
     # Build payload specifically for your Caby `customer_orders/create` endpoint
     caby_job_payload = {
         "order_type": "medicine",
-        "vehicle_type": "parcel_bike", # Or whatever config Caby uses for med drops
+        "vehicle_type": "parcel_bike", # Caby requires parcel_bike for pricing config
         "pickup_address": shop.address, 
         "pickup_lat": shop.latitude, # Dynamic Shop Lat
         "pickup_lng": shop.longitude, # Dynamic Shop Lng
@@ -236,17 +240,22 @@ def dispatch_order_to_caby(order_id: str, db: Session = Depends(get_db)):
         "drop_lng": order.delivery_lng,
         "drop_contact_name": order.receiver_name,
         "drop_contact_phone": order.receiver_phone,
-        "instructions": order.delivery_instructions,
-        "is_emergency": order.is_emergency,
-        "distance_km": order.distance_km,
+        "distance_km": order.distance_km if order.distance_km else 1.0,
         "estimated_time_mins": 15,
         "payment_method": order.payment_mode,
-        "item_count": len(order.items) if order.items else 0
+        "item_count": len(order.items) if order.items else 1,
+        "weight_kg": 1.0,
+    }
+    
+    headers = {
+        "Authorization": "Bearer e0b3549686a40712c06a1eb60c13768076ce805d3aba2ac069a530ad4b61287a7"
     }
     
     try:
+        caby_url = get_caby_url()
+        print(f"Dispatching to Caby URL: {caby_url}")
         # Create the job in Caby's system
-        response = requests.post(f"{CABY_BASE_URL}/create", json=caby_job_payload, timeout=3)
+        response = requests.post(f"{caby_url}/create", json=caby_job_payload, headers=headers, timeout=3)
         response.raise_for_status()
         caby_data = response.json()
         caby_tracking_id = caby_data["id"]
@@ -310,3 +319,38 @@ async def cancel_order(order_id: str, background_tasks: BackgroundTasks, db: Ses
     background_tasks.add_task(broadcast_cancel)
         
     return {"status": "success", "message": "Order cancelled successfully"}
+
+from pydantic import BaseModel
+
+class DriverUpdatePayload(BaseModel):
+    caby_order_id: str
+    driver_id: str
+    driver_name: str
+    driver_phone: str
+
+@router.post("/webhook/caby-driver-update")
+async def caby_driver_update(payload: DriverUpdatePayload, db: Session = Depends(get_db)):
+    """Receives webhook from Caby when a driver accepts the job."""
+    order = db.query(Order).filter(Order.caby_order_id == payload.caby_order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found for this caby_order_id")
+
+    order.rider_id = payload.driver_id
+    order.rider_name = payload.driver_name
+    order.rider_phone = payload.driver_phone
+    order.order_status = "driver_assigned"
+    db.commit()
+    db.refresh(order)
+
+    # Broadcast to the pharmacy shop's websocket via Redis PubSub
+    from routes.websockets import redis_manager
+    await redis_manager.connect()
+    await redis_manager.redis_client.publish(
+        f"shop_channel_{order.shop_id}",
+        json.dumps({
+            "type": "order_updated",
+            "order": order.to_dict()
+        })
+    )
+
+    return {"status": "success", "message": "Order updated with driver details"}
