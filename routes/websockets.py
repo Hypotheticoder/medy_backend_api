@@ -280,6 +280,20 @@ async def customer_tracking_endpoint(websocket: WebSocket, order_id: str):
     await manager.connect(websocket, manager.customer_tracking_rooms, order_id)
     await redis_manager.connect()
 
+    # Hydrate tracking screen with latest order data
+    db = SessionLocal()
+    try:
+        order = db.query(Order).filter(Order.order_id == order_id).first()
+        if order:
+            await websocket.send_json({
+                "type": "ORDER_UPDATED",
+                "order": order.to_dict()
+            })
+    except Exception as e:
+        logger.error(f"Error hydrating tracking: {e}")
+    finally:
+        db.close()
+
     pubsub = redis_manager.redis_client.pubsub()
     channel_name = f"live_tracking:{order_id}"
     await pubsub.subscribe(channel_name)
@@ -288,8 +302,11 @@ async def customer_tracking_endpoint(websocket: WebSocket, order_id: str):
         try:
             async for message in pubsub.listen():
                 if message["type"] == "message":
-                    location_data = json.loads(message["data"])
-                    await websocket.send_json({"type": "RIDER_LOCATION_UPDATE", "data": location_data})
+                    parsed_data = json.loads(message["data"])
+                    if isinstance(parsed_data, dict) and "type" in parsed_data:
+                        await websocket.send_json(parsed_data)
+                    else:
+                        await websocket.send_json({"type": "RIDER_LOCATION_UPDATE", "data": parsed_data})
         except asyncio.CancelledError:
             await pubsub.unsubscribe(channel_name)
 

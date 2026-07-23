@@ -327,6 +327,10 @@ class DriverUpdatePayload(BaseModel):
     driver_id: str
     driver_name: str
     driver_phone: str
+    pickup_otp: str = None
+    drop_otp: str = None
+    delivery_fee: float = None
+    status: str = None
 
 @router.post("/webhook/caby-driver-update")
 async def caby_driver_update(payload: DriverUpdatePayload, db: Session = Depends(get_db)):
@@ -338,18 +342,46 @@ async def caby_driver_update(payload: DriverUpdatePayload, db: Session = Depends
     order.rider_id = payload.driver_id
     order.rider_name = payload.driver_name
     order.rider_phone = payload.driver_phone
-    order.order_status = "driver_assigned"
+    if payload.pickup_otp is not None:
+        order.pickup_otp = payload.pickup_otp
+    if payload.drop_otp is not None:
+        order.drop_otp = payload.drop_otp
+    if payload.delivery_fee is not None:
+        order.delivery_fee = payload.delivery_fee
+        
+    if payload.status:
+        if payload.status == "picked_up":
+            order.order_status = "out_for_delivery"
+        elif payload.status == "delivered":
+            order.order_status = "delivered"
+        else:
+            order.order_status = "driver_assigned"
+    else:
+        order.order_status = "driver_assigned"
+        
     db.commit()
     db.refresh(order)
 
     # Broadcast to the pharmacy shop's websocket via Redis PubSub
     from routes.websockets import redis_manager
     await redis_manager.connect()
+    
+    order_dict = order.to_dict()
+    
     await redis_manager.redis_client.publish(
         f"shop_channel_{order.shop_id}",
         json.dumps({
             "type": "order_updated",
-            "order": order.to_dict()
+            "order": order_dict
+        })
+    )
+    
+    # Broadcast to customer's tracking websocket via Redis PubSub
+    await redis_manager.redis_client.publish(
+        f"live_tracking:{order.order_id}",
+        json.dumps({
+            "type": "ORDER_UPDATED",
+            "order": order_dict
         })
     )
 
