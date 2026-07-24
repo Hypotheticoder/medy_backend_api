@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
 from sqlalchemy.orm import Session
 import requests
 import logging
@@ -75,6 +75,7 @@ async def place_order(payload: dict, background_tasks: BackgroundTasks, db: Sess
             "taxes": new_order.taxes,
             "total_bill_amount": new_order.total_bill_amount,
             "order_type": new_order.order_type,
+            "prescription_url": new_order.prescription_url,
             "is_emergency": new_order.is_emergency,
             "created_at": new_order.created_at.isoformat() if new_order.created_at else None
         }
@@ -272,7 +273,7 @@ def dispatch_order_to_caby(order_id: str, db: Session = Depends(get_db)):
 
 @router.post("/upload-prescription")
 async def upload_prescription(
-    customer_id: str,
+    customer_id: str = Form(...),
     prescription: UploadFile = File(...)
 ):
     """Uploads a customer's prescription and returns the URL."""
