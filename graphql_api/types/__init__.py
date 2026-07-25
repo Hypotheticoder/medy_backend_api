@@ -3,11 +3,19 @@ from .pharma_shop import PharmaShopType
 from .order_bid import OrderBidType
 from .order import OrderType
 from .cart import CartType
+from .lab_booking import LabBookingType
+from .lab_test import LabTestType, LabTestPricingType, MatchedTestType, MissingTestType, LabPackageType
 
 __all__ = [
     "MedicineType",
     "PharmaShopType",
     "OrderBidType",
     "OrderType",
-    "CartType"
+    "CartType",
+    "LabBookingType",
+    "LabTestType",
+    "LabTestPricingType",
+    "MatchedTestType",
+    "MissingTestType",
+    "LabPackageType"
 ]

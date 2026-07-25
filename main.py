@@ -43,6 +43,10 @@ app.include_router(pharma_shop_router)
 app.include_router(medicine_router)
 app.include_router(order_router)
 app.include_router(websocket_router)
+from routes.lab_booking import router as lab_booking_router
+from routes.lab_test import router as lab_test_router
+app.include_router(lab_booking_router)
+app.include_router(lab_test_router)
 
 # Mount GraphQL Route
 app.include_router(graphql_app, prefix="/graphql")

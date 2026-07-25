@@ -1,13 +1,19 @@
 import strawberry
 from typing import List, Optional
 from strawberry.types import Info
+from sqlalchemy import or_
 
 from graphql_api.types import MedicineType, OrderType, PharmaShopType, CartType
+from graphql_api.types import LabBookingType, LabTestType, LabPackageType, MatchedTestType, MissingTestType
 
 from models.medicine import Medicine
 from models.order import Order
 from models.pharma_shop import PharmaShopUser
 from models.cart import Cart
+from models.lab import LabUser
+from models.lab_test import LabTest
+from models.lab_test_pricing import LabTestPricing
+from models.lab_booking import LabBooking
 
 @strawberry.type
 class Query:
@@ -90,3 +96,159 @@ class Query:
                 updated_at=None
             )
         return cart
+
+    # ==========================================
+    # LAB SEARCH QUERIES
+    # ==========================================
+    
+    @strawberry.field
+    def search_lab_tests(self, info: Info, query: str, limit: int = 20) -> List[LabTestType]:
+        """
+        Smart Search: Looks inside the test name, category, description, AND hidden search tags!
+        If they type "sugar", it will catch the "sugar" tag inside the HbA1c test.
+        """
+        db = info.context["db"]
+        search_term = f"%{query}%"
+        
+        return db.query(LabTest).filter(
+            or_(
+                LabTest.test_name.ilike(search_term),
+                LabTest.category.ilike(search_term),
+                LabTest.description.ilike(search_term),
+                LabTest.search_tags.ilike(search_term) 
+            )
+        ).order_by(
+            LabTest.is_profile.desc(), 
+            LabTest.test_name.asc()
+        ).limit(limit).all()
+
+    @strawberry.field
+    def find_labs_for_selected_tests(self, info: Info, test_ids: List[str]) -> List[LabPackageType]:
+        """
+        The Magic Cart Algorithm. 
+        Takes a list of test_ids the customer wants, and finds the best labs for them.
+        """
+        if not test_ids:
+            return []
+
+        db = info.context["db"]
+        
+        # 1. Fetch the Global Info for the requested tests (so we know their names)
+        requested_tests = db.query(LabTest).filter(LabTest.test_id.in_(test_ids)).all()
+        test_dict = {t.test_id: t.test_name for t in requested_tests}
+        
+        # 2. Fetch all pricing rows where labs offer ANY of these tests
+        pricings = db.query(LabTestPricing).filter(LabTestPricing.test_id.in_(test_ids)).all()
+        
+        if not pricings:
+            return [] # Nobody offers any of these tests!
+            
+        # 3. Group the pricings by Lab
+        lab_offerings = {}
+        for p in pricings:
+            if p.lab_id not in lab_offerings:
+                lab_offerings[p.lab_id] = []
+            lab_offerings[p.lab_id].append(p)
+            
+        # 4. Fetch the Lab details for the labs we found
+        lab_ids = list(lab_offerings.keys())
+        labs = db.query(LabUser).filter(LabUser.lab_id.in_(lab_ids)).all()
+        lab_dict = {l.lab_id: l for l in labs}
+        
+        # 5. Build the Packages!
+        packages = []
+        for lab_id, offerings in lab_offerings.items():
+            lab_info = lab_dict.get(lab_id)
+            if not lab_info:
+                continue
+                
+            matched = []
+            total_price = 0.0
+            offered_test_ids = set()
+            
+            # Add the matched ones
+            for offer in offerings:
+                matched.append(MatchedTestType(
+                    test_id=offer.test_id,
+                    test_name=test_dict.get(offer.test_id, "Unknown Test"),
+                    price=offer.final_price
+                ))
+                total_price += offer.final_price
+                offered_test_ids.add(offer.test_id)
+                
+            # Find the missing ones
+            missing = []
+            for req_id in test_ids:
+                if req_id not in offered_test_ids:
+                    missing.append(MissingTestType(
+                        test_id=req_id,
+                        test_name=test_dict.get(req_id, "Unknown Test")
+                    ))
+            
+            is_full_match = len(missing) == 0
+            
+            packages.append(LabPackageType(
+                lab_id=lab_id,
+                lab_name=lab_info.lab_name,
+                rating=lab_info.rating,
+                total_price=round(total_price, 2),
+                matched_tests=matched,
+                missing_tests=missing,
+                is_full_match=is_full_match,
+                match_count=len(matched)
+            ))
+            
+        # 6. Smart Sorting: Full matches first, then by most matches, then cheapest
+        packages.sort(key=lambda x: (
+            not x.is_full_match, # False (Full match) comes before True
+            -x.match_count,      # Higher matches come first
+            x.total_price        # Lower price comes first
+        ))
+        
+        return packages
+
+    @strawberry.field
+    def get_lab_inventory(self, info: Info, lab_id: str) -> List[LabTestType]:
+        """Shows all tests a specific lab offers. Useful if a customer visits a lab's profile."""
+        db = info.context["db"]
+        
+        # Join LabTest and LabTestPricing
+        results = db.query(LabTest, LabTestPricing).join(
+            LabTestPricing, LabTest.test_id == LabTestPricing.test_id
+        ).filter(
+            LabTestPricing.lab_id == lab_id
+        ).all()
+        
+        # We overwrite the global MRP with the Lab's specific final_price so the UI shows the correct price!
+        inventory = []
+        for test, pricing in results:
+            inventory.append(LabTestType(
+                test_id=test.test_id,
+                test_name=test.test_name,
+                category=test.category,
+                description=test.description,
+                is_profile=test.is_profile,
+                number_of_parameters=test.number_of_parameters,
+                sample_type=test.sample_type,
+                search_tags=test.search_tags,
+                fasting_required=test.fasting_required,
+                fasting_hours=test.fasting_hours,
+                pre_test_info=test.pre_test_info
+                # Note: If you want to return the price here, add it to LabTestType or create a specific LabInventoryItemType!
+            ))
+        return inventory
+
+    # ==========================================
+    # LAB BOOKING HISTORY
+    # ==========================================
+    
+    @strawberry.field
+    def get_my_lab_bookings(self, info: Info, customer_id: str, limit: int = 10) -> List[LabBookingType]:
+        """
+        Used by the Flutter app's "My Lab Tests" tab to show the history 
+        of all their bookings, statuses, and download the PDF report URLs.
+        """
+        db = info.context["db"]
+        return db.query(LabBooking).filter(
+            LabBooking.customer_id == customer_id
+        ).order_by(LabBooking.created_at.desc()).limit(limit).all()

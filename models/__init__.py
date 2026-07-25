@@ -5,6 +5,9 @@ from .medicine import Medicine
 from .order import Order
 from .order_bid import OrderBid
 from .cart import Cart
+from .lab_booking import LabBooking
+from .lab_test import LabTest
+from .lab_test_pricing import LabTestPricing
 
 __all__ = [
     "CustomerUser",
@@ -13,5 +16,8 @@ __all__ = [
     "Medicine",
     "Order",
     "OrderBid",
-    "Cart"
+    "Cart",
+    "LabBooking",
+    "LabTest",
+    "LabTestPricing"
 ]
