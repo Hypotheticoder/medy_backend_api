@@ -33,8 +33,9 @@ class LabTestResponse(LabTestCreate):
 class LabTestPricingCreate(BaseModel):
     """Payload sent by a PathLab to add a test to their specific inventory."""
     test_id: str = Field(..., description="The ID from the Global Catalog")
+    lab_base_rate: float
+    customer_selling_price: float
     mrp: float
-    discount_percent: float = Field(0.0, description="0 to 100")
     
     turnaround_time_hours: int = Field(24, description="How fast do they give the report?")
     home_collection_available: bool = True
@@ -43,7 +44,6 @@ class LabTestPricingCreate(BaseModel):
 class LabTestPricingResponse(LabTestPricingCreate):
     id: str
     lab_id: str
-    final_price: float
     
     class Config:
         from_attributes = True

@@ -8,9 +8,9 @@ class LabTestPricingType:
     id: str
     lab_id: str
     test_id: str
+    lab_base_rate: float
+    customer_selling_price: float
     mrp: float
-    discount_percent: float
-    final_price: float
     turnaround_time_hours: int
     home_collection_available: bool
     walk_in_available: bool

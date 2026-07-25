@@ -171,9 +171,9 @@ class Query:
                 matched.append(MatchedTestType(
                     test_id=offer.test_id,
                     test_name=test_dict.get(offer.test_id, "Unknown Test"),
-                    price=offer.final_price
+                    price=offer.customer_selling_price
                 ))
-                total_price += offer.final_price
+                total_price += offer.customer_selling_price
                 offered_test_ids.add(offer.test_id)
                 
             # Find the missing ones
