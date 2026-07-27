@@ -8,6 +8,7 @@ from .cart import Cart
 from .lab_booking import LabBooking
 from .lab_test import LabTest
 from .lab_test_pricing import LabTestPricing
+from .payment import PaymentTransaction
 
 __all__ = [
     "CustomerUser",
@@ -19,5 +20,6 @@ __all__ = [
     "Cart",
     "LabBooking",
     "LabTest",
-    "LabTestPricing"
+    "LabTestPricing",
+    "PaymentTransaction"
 ]
