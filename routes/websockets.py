@@ -320,3 +320,39 @@ async def customer_tracking_endpoint(websocket: WebSocket, order_id: str):
     except WebSocketDisconnect:
         manager.disconnect(websocket, manager.customer_tracking_rooms, order_id)
         listener_task.cancel()
+
+@router.websocket("/labs/{lab_id}")
+async def lab_notifications_endpoint(websocket: WebSocket, lab_id: str):
+    """
+    Pathology Labs connect their tablets here. 
+    It sits silently and waits for the Redis Ping we fired in the REST '/book' route.
+    """
+    # 1. Connect the Lab's WebSocket
+    # We can reuse the active_shops dictionary or create a new one for labs
+    await manager.connect(websocket, manager.active_shops, lab_id)
+    await redis_manager.connect()
+
+    # 2. Subscribe to this specific lab's private channel
+    pubsub = redis_manager.redis_client.pubsub()
+    channel_name = f"lab_orders:{lab_id}"
+    await pubsub.subscribe(channel_name)
+
+    # 3. Background task to push Redis alerts straight to the Lab's tablet
+    async def lab_alert_listener():
+        try:
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    # This contains {"type": "NEW_LAB_BOOKING", "booking": {...}}
+                    await websocket.send_text(message["data"])
+        except asyncio.CancelledError:
+            await pubsub.unsubscribe(channel_name)
+
+    listener_task = asyncio.create_task(lab_alert_listener())
+
+    try:
+        while True:
+            # Keep connection alive / handle client-side ping-pongs
+            await websocket.receive_text() 
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, manager.active_shops, lab_id)
+        listener_task.cancel() # Stop listening when they turn off the tablet

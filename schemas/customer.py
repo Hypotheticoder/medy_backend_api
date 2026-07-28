@@ -23,6 +23,7 @@ class CustomerResponse(CustomerBase):
     firebase_uid: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    saved_addresses: list = []
 
     class Config:
         from_attributes = True

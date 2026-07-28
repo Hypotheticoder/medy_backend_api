@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, HTTPException, status, Header, Form, UploadFile, File
 from sqlalchemy.orm import Session
 import logging
+import os
+import shutil
 import firebase_admin
 from firebase_admin import credentials, auth
 
@@ -18,6 +20,7 @@ from schemas.auth import (
     VendorLoginRequest, 
     TokenResponse,
     AdminCreateShopRequest,
+    LabProfileResponse,
     AdminCreateLabRequest,
     CheckPhoneRequest
 )
@@ -137,21 +140,68 @@ def admin_register_shop(payload: AdminCreateShopRequest, db: Session = Depends(g
     return {"status": "success", "message": "Shop created successfully", "shop_id": new_shop.shop_id}
 
 @router.post("/admin/register-lab")
-def admin_register_lab(payload: AdminCreateLabRequest, db: Session = Depends(get_db)):
-    """Admin route to onboard a lab. Hashes the password securely."""
-    existing = db.query(LabUser).filter(LabUser.phone == payload.phone).first()
+def admin_register_lab(
+    phone: str = Form(...),
+    owner_name: str = Form(...),
+    lab_name: str = Form(...),
+    address: str = Form(...),
+    latitude: float = Form(...),
+    longitude: float = Form(...),
+    license_number: str = Form(...),
+    password: str = Form(...),
+    pan_number: str = Form(...),
+    nabl_accreditation_number: str = Form(...),
+    gst_number: str = Form(None),
+    emergency_contact_number: str = Form(None),
+    whatsapp_number: str = Form(None),
+    registration_certificate: UploadFile = File(...),
+    bank_passbook: UploadFile = File(...),
+    lab_image: UploadFile = File(None),
+    db: Session = Depends(get_db)
+):
+    """Admin route to onboard a lab with file uploads. Hashes the password securely."""
+    existing = db.query(LabUser).filter(LabUser.phone == phone).first()
     if existing:
         raise HTTPException(status_code=400, detail="Phone number already registered to a lab.")
         
-    hashed_pwd = get_password_hash(payload.password)
+    hashed_pwd = get_password_hash(password)
     
-    lab_data = payload.model_dump(exclude={"password"})
+    lab_name_safe = "".join(c if c.isalnum() else "_" for c in lab_name)
+    base_upload_path = os.path.join("uploads", lab_name_safe)
+    os.makedirs(base_upload_path, exist_ok=True)
+
+    def save_upload_file(upload_file: UploadFile, field_name: str) -> str:
+        field_path = os.path.join(base_upload_path, field_name)
+        os.makedirs(field_path, exist_ok=True)
+        file_path = os.path.join(field_path, upload_file.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(upload_file.file, buffer)
+        return f"/uploads/{lab_name_safe}/{field_name}/{upload_file.filename}"
+
+    registration_certificate_url = save_upload_file(registration_certificate, "registration_certificate")
+    bank_passbook_url = save_upload_file(bank_passbook, "bank_passbook")
+    lab_image_url = save_upload_file(lab_image, "lab_image") if lab_image else None
+
     new_lab = LabUser(
         lab_id=generate_lab_id(),
+        phone=phone,
+        owner_name=owner_name,
+        lab_name=lab_name,
+        address=address,
+        latitude=latitude,
+        longitude=longitude,
+        license_number=license_number,
         password=hashed_pwd,
+        pan_number=pan_number,
+        nabl_accreditation_number=nabl_accreditation_number,
+        gst_number=gst_number,
+        emergency_contact_number=emergency_contact_number,
+        whatsapp_number=whatsapp_number,
+        registration_certificate_url=registration_certificate_url,
+        bank_passbook_url=bank_passbook_url,
+        lab_image=lab_image_url,
         status="pending",
-        is_verified=False,
-        **lab_data # 🪄 Magic! Unpacks all the fields
+        is_verified=False
     )
     
     db.add(new_lab)
@@ -189,3 +239,69 @@ def lab_login(payload: VendorLoginRequest, db: Session = Depends(get_db)):
 
     access_token = create_access_token(data={"sub": lab.lab_id, "role": "lab"})
     return {"access_token": access_token, "user_id": lab.lab_id, "user_type": "lab"}
+
+@router.get("/lab/get-by/{lab_id}", response_model=LabProfileResponse)
+def get_lab_by_id(lab_id: str, db: Session = Depends(get_db)):
+    """Fetch Lab Profile by ID"""
+    lab = db.query(LabUser).filter(LabUser.lab_id == lab_id).first()
+    if not lab:
+        raise HTTPException(status_code=404, detail="Lab not found")
+    return lab
+
+@router.put("/lab/update-by/{lab_id}", response_model=LabProfileResponse)
+def update_lab_profile(
+    lab_id: str,
+    email: str = Form(None),
+    address: str = Form(None),
+    latitude: float = Form(None),
+    longitude: float = Form(None),
+    emergency_contact_number: str = Form(None),
+    whatsapp_number: str = Form(None),
+    is_accepting_bookings: bool = Form(None),
+    lab_image: UploadFile = File(None),
+    registration_certificate: UploadFile = File(None),
+    bank_passbook: UploadFile = File(None),
+    db: Session = Depends(get_db)
+):
+    """Update Lab Profile settings (multipart)"""
+    lab = db.query(LabUser).filter(LabUser.lab_id == lab_id).first()
+    if not lab:
+        raise HTTPException(status_code=404, detail="Lab not found")
+        
+    if email is not None: lab.email = email
+    if address is not None: lab.address = address
+    if latitude is not None: lab.latitude = latitude
+    if longitude is not None: lab.longitude = longitude
+    if emergency_contact_number is not None: lab.emergency_contact_number = emergency_contact_number
+    if whatsapp_number is not None: lab.whatsapp_number = whatsapp_number
+    if is_accepting_bookings is not None: lab.is_accepting_bookings = is_accepting_bookings
+    
+    lab_name_safe = "".join(c if c.isalnum() else "_" for c in lab.lab_name)
+    
+    if lab_image:
+        base_upload_path = os.path.join("uploads", lab_name_safe, "lab_image")
+        os.makedirs(base_upload_path, exist_ok=True)
+        file_path = os.path.join(base_upload_path, lab_image.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(lab_image.file, buffer)
+        lab.lab_image = f"/uploads/{lab_name_safe}/lab_image/{lab_image.filename}"
+
+    if registration_certificate:
+        base_upload_path = os.path.join("uploads", lab_name_safe, "registration_certificate")
+        os.makedirs(base_upload_path, exist_ok=True)
+        file_path = os.path.join(base_upload_path, registration_certificate.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(registration_certificate.file, buffer)
+        lab.registration_certificate_url = f"/uploads/{lab_name_safe}/registration_certificate/{registration_certificate.filename}"
+
+    if bank_passbook:
+        base_upload_path = os.path.join("uploads", lab_name_safe, "bank_passbook")
+        os.makedirs(base_upload_path, exist_ok=True)
+        file_path = os.path.join(base_upload_path, bank_passbook.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(bank_passbook.file, buffer)
+        lab.bank_passbook_url = f"/uploads/{lab_name_safe}/bank_passbook/{bank_passbook.filename}"
+
+    db.commit()
+    db.refresh(lab)
+    return lab

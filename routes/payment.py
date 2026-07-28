@@ -6,6 +6,8 @@ from db import get_db
 from models.payment import PaymentTransaction
 from schemas.payment_schemas import RazorpayOrderCreate, RazorpayVerifyRequest, RazorpayOrderResponse
 from crud.payment import create_payment_record, get_transaction_by_rzp_order_id, mark_payment_successful
+from models.order import Order
+from models.lab_booking import LabBooking
 
 router = APIRouter(prefix="/api/payments/razorpay", tags=["Razorpay Payments"])
 
@@ -80,7 +82,21 @@ def verify_payment(payload: RazorpayVerifyRequest, db: Session = Depends(get_db)
             signature=payload.razorpay_signature
         )
         
-        # 🚨 TODO: Update your `MedicineOrder` or `LabBooking` status to "paid" right here!
+        internal_id = transaction.order_id
+        if internal_id.startswith("ORD-"):
+            order = db.query(Order).filter(Order.order_id == internal_id).first()
+            if order:
+                order.payment_status = "paid"
+                order.order_status = "accepted"
+                order.transaction_id = payload.razorpay_payment_id
+        elif internal_id.startswith("LAB-BKG-"):
+            booking = db.query(LabBooking).filter(LabBooking.booking_id == internal_id).first()
+            if booking:
+                booking.payment_status = "paid"
+                booking.booking_status = "confirmed"
+                booking.transaction_id = payload.razorpay_payment_id
+                
+        db.commit()
         
         return {"status": "success", "message": "Payment securely verified and captured."}
         

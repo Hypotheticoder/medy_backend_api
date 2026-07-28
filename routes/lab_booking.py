@@ -85,3 +85,21 @@ def delete_booking(booking_id: str, db: Session = Depends(get_db)):
         "status": "success",
         "message": "Booking deleted successfully"
     }
+
+from models.lab_booking import LabBooking
+
+@router.get("/lab/{lab_id}")
+def get_bookings_by_lab(lab_id: str, db: Session = Depends(get_db)):
+    bookings = db.query(LabBooking).filter(LabBooking.lab_id == lab_id).all()
+    return {
+        "count": len(bookings),
+        "lab_id": lab_id,
+        "bookings": [b.to_dict() for b in bookings]
+    }
+
+@router.get("/{booking_id}")
+def get_booking_details(booking_id: str, db: Session = Depends(get_db)):
+    booking = db.query(LabBooking).filter(LabBooking.booking_id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    return booking.to_dict()

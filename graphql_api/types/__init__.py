@@ -5,6 +5,7 @@ from .order import OrderType
 from .cart import CartType
 from .lab_booking import LabBookingType
 from .lab_test import LabTestType, LabTestPricingType, MatchedTestType, MissingTestType, LabPackageType
+from .lab_user import LabUserType
 
 __all__ = [
     "MedicineType",
@@ -17,5 +18,6 @@ __all__ = [
     "LabTestPricingType",
     "MatchedTestType",
     "MissingTestType",
-    "LabPackageType"
+    "LabPackageType",
+    "LabUserType"
 ]

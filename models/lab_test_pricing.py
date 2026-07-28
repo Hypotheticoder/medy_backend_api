@@ -19,17 +19,13 @@ class LabTestPricing(Base):
     lab_id = Column(String, ForeignKey("lab_users.lab_id"), nullable=False, index=True)
     test_id = Column(String, ForeignKey("lab_tests.test_id"), nullable=False, index=True)
     
-    # 1. LAB'S BASE RATE (Internal)
-    # The lab sets this. This is the amount YOU owe the lab after the test is done.
-    lab_base_rate = Column(Float, nullable=False)
+    # NEW Pricing Fields to match Flutter App
+    price = Column(Float, nullable=False, server_default="0.0") # Used to be mrp
+    discount_percentage = Column(Float, nullable=False, server_default="0.0")
+    final_price = Column(Float, nullable=False, server_default="0.0") # Used to be customer_selling_price
     
-    # 2. PLATFORM SELLING PRICE (Customer facing)
-    # You (The Admin) set this based on your desired profit margin.
-    customer_selling_price = Column(Float, nullable=False)
-    
-    # 3. MARKETING MRP
-    # Used only for "Save 20%" banners.
-    mrp = Column(Float, nullable=False)
+    # Internal Base Rate (what the lab actually gets)
+    lab_base_rate = Column(Float, nullable=True)
     
     # NEW: Logistics & Turnaround Time (Crucial for conversion rate)
     turnaround_time_hours = Column(Integer, default=24) # e.g., 24 (Flutter shows: "Reports in 24 hrs")

@@ -11,6 +11,7 @@ from routes.medicine import router as medicine_router
 from routes.order import router as order_router
 from routes.websockets import router as websocket_router
 from routes.auth import router as auth_router
+from routes.customer import router as customer_router
 from routes.pharma_shop import router as pharma_shop_router
 
 # GraphQL Router
@@ -39,6 +40,7 @@ app.add_middleware(
 
 # Mount REST Routes
 app.include_router(auth_router)
+app.include_router(customer_router)
 app.include_router(pharma_shop_router)
 app.include_router(medicine_router)
 app.include_router(order_router)
@@ -50,6 +52,11 @@ from routes.payment import router as payment_router
 app.include_router(lab_booking_router)
 app.include_router(lab_test_router)
 app.include_router(payment_router)
+
+from routes.test_package import router as test_package_router
+from routes.about_us import router as about_us_router
+app.include_router(test_package_router)
+app.include_router(about_us_router)
 
 # Mount GraphQL Route
 app.include_router(graphql_app, prefix="/graphql")

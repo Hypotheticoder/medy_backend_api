@@ -64,3 +64,42 @@ class TokenResponse(BaseModel):
 class CheckPhoneRequest(BaseModel):
     """Payload to check if a phone number exists before sending OTP"""
     phone: str
+
+class LabProfileResponse(BaseModel):
+    """Payload representing a Lab User's Profile"""
+    lab_id: str
+    phone: str
+    email: Optional[str] = None
+    owner_name: str
+    lab_name: str
+    lab_image: Optional[str] = None
+    address: str
+    latitude: float
+    longitude: float
+    license_number: str
+    is_verified: bool
+    is_accepting_bookings: bool
+    rating: float
+    gst_number: Optional[str] = None
+    pan_number: str
+    nabl_accreditation_number: str
+    registration_certificate_url: str
+    bank_passbook_url: str
+    emergency_contact_number: Optional[str] = None
+    whatsapp_number: Optional[str] = None
+    
+    # We alias phone to mobile_number and lab_image to lab_logo_url so the Flutter app parses it automatically
+    # Or flutter already handles phone fallback?
+    # Flutter expects: mobile_number, email_address or email, lab_logo_url or lab_logo
+    class Config:
+        from_attributes = True
+        # Let's map model fields to flutter expected fields if needed.
+        # But flutter handles `mobile_number`, which we don't have.
+        # Let's just return what DB has and we'll fix flutter side if needed, but wait:
+        # Flutter's User.fromJson has:
+        # id: json['lab_id'] ?? json['id'],
+        # mobileNumber: json['mobile_number'],
+        # email: json['email_address'] ?? json['email'],
+        # labLogo: json['lab_logo_url'] ?? json['lab_logo']
+        # I will just return the exact fields that are in DB.
+

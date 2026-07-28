@@ -4,7 +4,8 @@ from strawberry.types import Info
 from sqlalchemy import or_
 
 from graphql_api.types import MedicineType, OrderType, PharmaShopType, CartType
-from graphql_api.types import LabBookingType, LabTestType, LabPackageType, MatchedTestType, MissingTestType
+from graphql_api.types import LabBookingType, LabTestType, LabPackageType, MatchedTestType, MissingTestType, LabUserType
+from graphql_api.types.lab_test import LabInventoryItemType
 
 from models.medicine import Medicine
 from models.order import Order
@@ -65,6 +66,15 @@ class Query:
         return db.query(PharmaShopUser).filter(PharmaShopUser.shop_id == shop_id).first()
 
     @strawberry.field
+    def get_lab_profile(self, info: Info, lab_id: str) -> Optional[LabUserType]:
+        """
+        Allows the customer (or the lab app itself) to fetch a lab's profile.
+        """
+        db = info.context["db"]
+        return db.query(LabUser).filter(LabUser.lab_id == lab_id).first()
+
+
+    @strawberry.field
     def get_active_shops_nearby(self, info: Info, lat: float, lng: float) -> List[PharmaShopType]:
         """
         Fetches shops to show on the map (Basic implementation).
@@ -100,9 +110,19 @@ class Query:
     # ==========================================
     # LAB SEARCH QUERIES
     # ==========================================
-    
+
     @strawberry.field
-    def search_lab_tests(self, info: Info, query: str, limit: int = 20) -> List[LabTestType]:
+    def get_all_global_tests(self, info: Info, limit: int = 20, offset: int = 0) -> List[LabTestType]:
+        db = info.context["db"]
+        return db.query(LabTest).order_by(LabTest.test_name.asc()).offset(offset).limit(limit).all()
+        
+    @strawberry.field
+    def get_core_test_by_id(self, info: Info, test_id: str) -> Optional[LabTestType]:
+        db = info.context["db"]
+        return db.query(LabTest).filter(LabTest.test_id == test_id).first()
+
+    @strawberry.field
+    def search_lab_tests(self, info: Info, query: str = "", limit: int = 20, offset: int = 0) -> List[LabTestType]:
         """
         Smart Search: Looks inside the test name, category, description, AND hidden search tags!
         If they type "sugar", it will catch the "sugar" tag inside the HbA1c test.
@@ -120,7 +140,7 @@ class Query:
         ).order_by(
             LabTest.is_profile.desc(), 
             LabTest.test_name.asc()
-        ).limit(limit).all()
+        ).offset(offset).limit(limit).all()
 
     @strawberry.field
     def find_labs_for_selected_tests(self, info: Info, test_ids: List[str]) -> List[LabPackageType]:
@@ -171,9 +191,9 @@ class Query:
                 matched.append(MatchedTestType(
                     test_id=offer.test_id,
                     test_name=test_dict.get(offer.test_id, "Unknown Test"),
-                    price=offer.customer_selling_price
+                    price=offer.final_price
                 ))
-                total_price += offer.customer_selling_price
+                total_price += offer.final_price
                 offered_test_ids.add(offer.test_id)
                 
             # Find the missing ones
@@ -208,7 +228,7 @@ class Query:
         return packages
 
     @strawberry.field
-    def get_lab_inventory(self, info: Info, lab_id: str) -> List[LabTestType]:
+    def get_lab_inventory(self, info: Info, lab_id: str, limit: int = 20, offset: int = 0) -> List[LabInventoryItemType]:
         """Shows all tests a specific lab offers. Useful if a customer visits a lab's profile."""
         db = info.context["db"]
         
@@ -217,12 +237,11 @@ class Query:
             LabTestPricing, LabTest.test_id == LabTestPricing.test_id
         ).filter(
             LabTestPricing.lab_id == lab_id
-        ).all()
+        ).offset(offset).limit(limit).all()
         
-        # We overwrite the global MRP with the Lab's specific final_price so the UI shows the correct price!
         inventory = []
         for test, pricing in results:
-            inventory.append(LabTestType(
+            inventory.append(LabInventoryItemType(
                 test_id=test.test_id,
                 test_name=test.test_name,
                 category=test.category,
@@ -233,8 +252,11 @@ class Query:
                 search_tags=test.search_tags,
                 fasting_required=test.fasting_required,
                 fasting_hours=test.fasting_hours,
-                pre_test_info=test.pre_test_info
-                # Note: If you want to return the price here, add it to LabTestType or create a specific LabInventoryItemType!
+                pre_test_info=test.pre_test_info,
+                price=pricing.price,
+                discount_percentage=pricing.discount_percentage,
+                final_price=pricing.final_price,
+                lab_id=pricing.lab_id
             ))
         return inventory
 

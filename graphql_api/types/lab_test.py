@@ -25,10 +25,31 @@ class LabTestType:
     is_profile: bool
     number_of_parameters: int
     sample_type: Optional[str]
-    search_tags: Optional[str] # Added for completeness
+    search_tags: Optional[str]
     fasting_required: bool
     fasting_hours: Optional[str]
     pre_test_info: Optional[str]
+
+@strawberry.type
+class LabInventoryItemType:
+    """Combined view for Lab Inventory including Test Info and Pricing."""
+    test_id: str
+    test_name: str
+    category: str
+    description: Optional[str]
+    is_profile: bool
+    number_of_parameters: int
+    sample_type: Optional[str]
+    search_tags: Optional[str]
+    fasting_required: bool
+    fasting_hours: Optional[str]
+    pre_test_info: Optional[str]
+    
+    # Pricing info
+    price: float
+    discount_percentage: float
+    final_price: float
+    lab_id: str
 
 # ==========================================
 # NEW: SMART MATCHING TYPES
