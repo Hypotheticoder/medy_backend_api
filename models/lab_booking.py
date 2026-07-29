@@ -47,13 +47,29 @@ class LabBooking(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
 
     def to_dict(self):
+        # Format booked tests to include 'item_name' for frontend compatibility if needed
+        # Or let frontend handle it. We'll send raw data and format patient details correctly.
         return {
             "booking_id": self.booking_id,
             "customer_id": self.customer_id,
             "lab_id": self.lab_id,
-            "patient_name": self.patient_name,
+            "booking_type": "home_collection" if self.is_home_collection else "lab_visit",
+            "patient_details": [{
+                "full_name": self.patient_name,
+                "name": self.patient_name,
+                "phone_number": self.patient_phone,
+                "age": self.patient_age,
+                "gender": self.patient_gender
+            }],
+            "sample_collection_address": {
+                "address_1": self.collection_address or ""
+            },
             "booked_tests": self.booked_tests,
+            "sub_total_amount": self.total_price,
             "total_price": self.total_price,
+            "platform_fee": 0.0,
+            "tax_amount": 0.0,
+            "total_amount_to_be_paid": self.total_price,
             "payment_mode": self.payment_mode,
             "booking_status": self.booking_status,
             "report_url": self.report_url,

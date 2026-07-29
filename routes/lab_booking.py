@@ -97,6 +97,15 @@ def get_bookings_by_lab(lab_id: str, db: Session = Depends(get_db)):
         "bookings": [b.to_dict() for b in bookings]
     }
 
+@router.get("/customer/{customer_id}")
+def get_bookings_by_customer(customer_id: str, db: Session = Depends(get_db)):
+    bookings = db.query(LabBooking).filter(LabBooking.customer_id == customer_id).order_by(LabBooking.created_at.desc()).all()
+    return {
+        "count": len(bookings),
+        "customer_id": customer_id,
+        "bookings": [b.to_dict() for b in bookings]
+    }
+
 @router.get("/{booking_id}")
 def get_booking_details(booking_id: str, db: Session = Depends(get_db)):
     booking = db.query(LabBooking).filter(LabBooking.booking_id == booking_id).first()
