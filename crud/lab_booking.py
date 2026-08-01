@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from models.lab_booking import LabBooking, generate_booking_id
-from schemas.lab_booking_schemas import LabBookingCreate
+from schemas.lab_booking_schemas import LabBookingCreate, LabBookingDetailsUpdate
+from crud.earnings import generate_earning_record
 
 def create_lab_booking(db: Session, customer_id: str, booking_data: LabBookingCreate) -> LabBooking:
     """Saves the customer's lab booking securely into the database."""
@@ -20,13 +21,26 @@ def create_lab_booking(db: Session, customer_id: str, booking_data: LabBookingCr
     db.refresh(db_booking)
     return db_booking
 
-def update_booking_status(db: Session, booking_id: str, new_status: str) -> LabBooking:
+def update_booking_status(db: Session, booking_id: str, new_status: str, cancellation_reason: str = None) -> LabBooking:
     """Called by the Pathology Lab when they update the status."""
     booking = db.query(LabBooking).filter(LabBooking.booking_id == booking_id).first()
     if booking:
         booking.booking_status = new_status
+        if new_status == "cancelled" and cancellation_reason:
+            booking.cancellation_reason = cancellation_reason
+            
         db.commit()
         db.refresh(booking)
+        
+        if new_status in ["accepted", "sample_collected", "processing", "report_ready", "completed"]:
+            generate_earning_record(
+                db=db,
+                vendor_id=booking.lab_id,
+                vendor_type="lab",
+                order_id=booking.booking_id,
+                total_amount=booking.total_price
+            )
+            
     return booking
 
 def attach_report_url(db: Session, booking_id: str, file_url: str) -> LabBooking:
@@ -37,6 +51,17 @@ def attach_report_url(db: Session, booking_id: str, file_url: str) -> LabBooking
         booking.booking_status = "report_ready" # Auto-update status
         db.commit()
         db.refresh(booking)
+        
+        # 🚨 GENERATE EARNINGS 🚨
+        # When the report is ready, the service is considered fully delivered.
+        generate_earning_record(
+            db=db,
+            vendor_id=booking.lab_id,
+            vendor_type="lab",
+            order_id=booking.booking_id,
+            total_amount=booking.total_price
+        )
+        
     return booking
 
 def delete_lab_booking(db: Session, booking_id: str) -> bool:
@@ -47,3 +72,14 @@ def delete_lab_booking(db: Session, booking_id: str) -> bool:
         db.commit()
         return True
     return False
+
+def update_lab_booking_details(db: Session, booking_id: str, payload: LabBookingDetailsUpdate) -> LabBooking:
+    booking = db.query(LabBooking).filter(LabBooking.booking_id == booking_id).first()
+    if booking:
+        update_data = payload.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            if value is not None:
+                setattr(booking, key, value)
+        db.commit()
+        db.refresh(booking)
+    return booking

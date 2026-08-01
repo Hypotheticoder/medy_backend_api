@@ -4,7 +4,7 @@ from strawberry.types import Info
 from sqlalchemy import or_
 
 from graphql_api.types import MedicineType, OrderType, PharmaShopType, CartType
-from graphql_api.types import LabBookingType, LabTestType, LabPackageType, MatchedTestType, MissingTestType, LabUserType
+from graphql_api.types import LabBookingType, LabTestType, LabPackageType, MatchedTestType, MissingTestType, LabUserType, VendorLedgerType, DashboardEarningsType
 from graphql_api.types.lab_test import LabInventoryItemType
 
 from models.medicine import Medicine
@@ -274,3 +274,51 @@ class Query:
         return db.query(LabBooking).filter(
             LabBooking.customer_id == customer_id
         ).order_by(LabBooking.created_at.desc()).limit(limit).all()
+
+    # ==========================================
+    # NEW: VENDOR EARNINGS DASHBOARD
+    # ==========================================
+    
+    @strawberry.field
+    def get_vendor_earnings_dashboard(self, info: Info, vendor_id: str, vendor_type: str) -> DashboardEarningsType:
+        """
+        Works for BOTH Labs and Pharmacies!
+        vendor_type must be either 'lab' or 'pharmacy'
+        """
+        from models.vendor_ledger import VendorLedger # Import the model
+        db = info.context["db"]
+        
+        # 1. Fetch all rows for this specific vendor
+        ledgers = db.query(VendorLedger).filter(
+            VendorLedger.vendor_id == vendor_id,
+            VendorLedger.vendor_type == vendor_type
+        ).order_by(VendorLedger.created_at.desc()).all()
+        
+        total_earnings = 0.0
+        pending_payouts = 0.0
+        
+        # 2. Do the math securely on the backend
+        for row in ledgers:
+            total_earnings += row.vendor_earning
+            if row.settlement_status in ["pending_clearance", "ready_for_payout"]:
+                pending_payouts += row.vendor_earning
+                
+        # 3. Format the recent transactions for the list view below the cards
+        recent_txns = []
+        for row in ledgers[:10]: # Only send the 10 most recent to keep the app fast
+            recent_txns.append(VendorLedgerType(
+                ledger_id=row.ledger_id,
+                order_id=row.order_id,
+                total_customer_paid=row.total_customer_paid,
+                platform_commission=row.platform_commission,
+                vendor_earning=row.vendor_earning,
+                settlement_status=row.settlement_status,
+                created_at=row.created_at.isoformat() if row.created_at else ""
+            ))
+            
+        return DashboardEarningsType(
+            total_lifetime_earnings=round(total_earnings, 2),
+            pending_bank_payouts=round(pending_payouts, 2),
+            total_orders_completed=len(ledgers),
+            recent_transactions=recent_txns
+        )

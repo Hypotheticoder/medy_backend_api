@@ -28,12 +28,23 @@ class LabBookingCreate(BaseModel):
 class LabBookingStatusUpdate(BaseModel):
     """Payload for the Lab's tablet to update the booking state."""
     new_status: str = Field(..., description="e.g., sample_collected, processing, report_ready")
+    cancellation_reason: Optional[str] = None
+
+class LabBookingDetailsUpdate(BaseModel):
+    """Payload to edit common booking details"""
+    patient_name: Optional[str] = None
+    patient_phone: Optional[str] = None
+    patient_age: Optional[str] = None
+    total_price: Optional[float] = None
+    payment_mode: Optional[str] = None
+    payment_status: Optional[str] = None
 
 class LabBookingResponse(LabBookingCreate):
     booking_id: str
     customer_id: str
     payment_status: str
     booking_status: str
+    cancellation_reason: Optional[str] = None
     report_url: Optional[str]
     created_at: datetime
     

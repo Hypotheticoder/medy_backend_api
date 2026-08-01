@@ -55,8 +55,10 @@ app.include_router(payment_router)
 
 from routes.test_package import router as test_package_router
 from routes.about_us import router as about_us_router
+from routes.earnings import router as earnings_router
 app.include_router(test_package_router)
 app.include_router(about_us_router)
+app.include_router(earnings_router)
 
 # Mount GraphQL Route
 app.include_router(graphql_app, prefix="/graphql")

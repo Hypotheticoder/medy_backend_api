@@ -54,21 +54,36 @@ async def place_lab_booking(
         "message": "Booking confirmed and sent to the lab."
     }
 
-from crud.lab_booking import update_booking_status, delete_lab_booking
-from schemas.lab_booking_schemas import LabBookingStatusUpdate
+from crud.lab_booking import update_booking_status, delete_lab_booking, update_lab_booking_details
+from schemas.lab_booking_schemas import LabBookingStatusUpdate, LabBookingDetailsUpdate
 
 @router.put("/status/{booking_id}")
 def update_lab_booking_status(booking_id: str, payload: LabBookingStatusUpdate, db: Session = Depends(get_db)):
     """
     Called by the Lab to update the booking state (e.g. sample_collected, processing).
     """
-    updated_booking = update_booking_status(db, booking_id, payload.new_status)
+    updated_booking = update_booking_status(db, booking_id, payload.new_status, payload.cancellation_reason)
     if not updated_booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     
     return {
         "status": "success",
         "message": f"Booking status updated to {payload.new_status}",
+        "booking": updated_booking.to_dict()
+    }
+
+@router.put("/details/{booking_id}")
+def update_booking_details(booking_id: str, payload: LabBookingDetailsUpdate, db: Session = Depends(get_db)):
+    """
+    Called by the Lab to update the booking details (patient info, price, payment mode).
+    """
+    updated_booking = update_lab_booking_details(db, booking_id, payload)
+    if not updated_booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    
+    return {
+        "status": "success",
+        "message": "Booking details updated",
         "booking": updated_booking.to_dict()
     }
 

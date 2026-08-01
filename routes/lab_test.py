@@ -1,10 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from typing import List, Optional
 import logging
 
 from db import get_db
-from schemas.lab_test_schemas import LabTestCreate, LabTestResponse, LabTestPricingCreate, LabTestPricingResponse
-from crud.lab_test import create_global_test, add_pricing_for_lab
+from schemas.lab_test_schemas import LabTestCreate, LabTestResponse, LabTestPricingCreate, LabTestPricingResponse, LabTestPricingUpdate, LabInventoryItemResponse
+from crud.lab_test import create_global_test, add_pricing_for_lab, get_inventory_for_lab, update_lab_pricing, delete_lab_pricing
+
+# 🚨 Import the models so we can run our validation checks!
+from models.lab_test import LabTest
+from models.lab_test_pricing import LabTestPricing 
 
 router = APIRouter(prefix="/api/rest/lab-inventory", tags=["REST - Lab Inventory"])
 logger = logging.getLogger(__name__)
@@ -12,6 +17,16 @@ logger = logging.getLogger(__name__)
 @router.post("/global", response_model=LabTestResponse)
 def add_global_test(payload: LabTestCreate, db: Session = Depends(get_db)):
     """Admin Only: Add a new medical test to the global dictionary."""
+    
+    # 🚨 VALIDATION 1: Prevent duplicate Global Tests
+    # We use .ilike() so "CBC" and "cbc" are treated as the exact same thing!
+    existing_global_test = db.query(LabTest).filter(LabTest.test_name.ilike(payload.test_name)).first()
+    if existing_global_test:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"A test named '{existing_global_test.test_name}' already exists in the global catalog."
+        )
+
     try:
         new_test = create_global_test(db, payload)
         return new_test
@@ -22,7 +37,19 @@ def add_global_test(payload: LabTestCreate, db: Session = Depends(get_db)):
 @router.post("/pricing/{lab_id}", response_model=LabTestPricingResponse)
 def add_test_to_lab(lab_id: str, payload: LabTestPricingCreate, db: Session = Depends(get_db)):
     """Patholab Back-Office: A lab adds a test to their inventory and sets their price."""
-    # Note: In production, verify the lab_id matches the logged-in JWT token!
+    
+    # 🚨 VALIDATION 2: Prevent a Lab from adding the exact same test twice
+    existing_inventory_item = db.query(LabTestPricing).filter(
+        LabTestPricing.lab_id == lab_id,
+        LabTestPricing.test_id == payload.test_id
+    ).first()
+    
+    if existing_inventory_item:
+        raise HTTPException(
+            status_code=400, 
+            detail="You already have this test in your inventory. Please edit the existing price instead of adding it again."
+        )
+
     try:
         new_pricing = add_pricing_for_lab(db, lab_id, payload)
         return new_pricing
@@ -30,42 +57,39 @@ def add_test_to_lab(lab_id: str, payload: LabTestPricingCreate, db: Session = De
         logger.error(f"Failed to add pricing for lab {lab_id}: {e}")
         raise HTTPException(status_code=500, detail="Could not add test to lab inventory.")
 
-from typing import List, Optional
-from models.lab_test import LabTest
-from models.lab_test_pricing import LabTestPricing
-
 @router.get("/global", response_model=List[LabTestResponse])
 def get_global_tests(db: Session = Depends(get_db)):
+    """Fetch all tests from the global catalog."""
     return db.query(LabTest).all()
 
 @router.get("/global/search", response_model=List[LabTestResponse])
 def search_global_tests(query: str, db: Session = Depends(get_db)):
+    """Search for global tests by name."""
     return db.query(LabTest).filter(LabTest.test_name.ilike(f"%{query}%")).all()
 
-@router.get("/pricing/{lab_id}", response_model=List[LabTestPricingResponse])
-def get_lab_inventory(lab_id: str, db: Session = Depends(get_db)):
-    return db.query(LabTestPricing).filter(LabTestPricing.lab_id == lab_id).all()
+# ==========================================
+# INVENTORY MANAGEMENT ROUTES
+# ==========================================
 
-@router.put("/{test_id}", response_model=LabTestPricingResponse)
-def update_lab_inventory(test_id: str, payload: LabTestPricingCreate, db: Session = Depends(get_db)):
-    pricing = db.query(LabTestPricing).filter(LabTestPricing.test_id == test_id, LabTestPricing.lab_id == payload.lab_id).first()
-    if not pricing:
-        raise HTTPException(status_code=404, detail="Test pricing not found in this lab inventory")
+@router.get("/{lab_id}", response_model=List[LabInventoryItemResponse])
+def view_lab_inventory(lab_id: str, db: Session = Depends(get_db)):
+    """Patholab Back-Office: Fetch the full table of tests offered by this lab."""
+    return get_inventory_for_lab(db, lab_id)
+
+@router.put("/pricing/{pricing_id}", response_model=LabTestPricingResponse)
+def edit_inventory_item(pricing_id: str, payload: LabTestPricingUpdate, db: Session = Depends(get_db)):
+    """Patholab Back-Office: Edit the MRP, Discount, or Turnaround Time for a test."""
+    update_data = payload.model_dump(exclude_unset=True)
+    updated_pricing = update_lab_pricing(db, pricing_id, update_data)
     
-    pricing.price = payload.price
-    pricing.discount_percentage = payload.discount_percentage
-    pricing.final_price = payload.final_price
-    db.commit()
-    db.refresh(pricing)
-    return pricing
+    if not updated_pricing:
+        raise HTTPException(status_code=404, detail="Pricing item not found.")
+    return updated_pricing
 
-from pydantic import BaseModel
-class DeleteInventoryRequest(BaseModel):
-    test_ids: List[str]
-    lab_id: str
-
-@router.post("/delete-by-ids")
-def delete_lab_inventory(payload: DeleteInventoryRequest, db: Session = Depends(get_db)):
-    db.query(LabTestPricing).filter(LabTestPricing.lab_id == payload.lab_id, LabTestPricing.test_id.in_(payload.test_ids)).delete(synchronize_session=False)
-    db.commit()
-    return {"status": "success", "message": "Tests removed from inventory successfully"}
+@router.delete("/pricing/{pricing_id}")
+def remove_test_from_inventory(pricing_id: str, db: Session = Depends(get_db)):
+    """Patholab Back-Office: Delete a test from this lab's offerings."""
+    success = delete_lab_pricing(db, pricing_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Pricing item not found.")
+    return {"status": "success", "message": "Test removed from inventory."}

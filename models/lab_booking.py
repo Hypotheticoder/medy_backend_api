@@ -42,6 +42,9 @@ class LabBooking(Base):
 
     # The final PDF report link that the Lab will upload later
     report_url = Column(String, nullable=True)
+    
+    # Optional reason if the booking is cancelled
+    cancellation_reason = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
@@ -71,7 +74,9 @@ class LabBooking(Base):
             "tax_amount": 0.0,
             "total_amount_to_be_paid": self.total_price,
             "payment_mode": self.payment_mode,
+            "payment_status": self.payment_status,
             "booking_status": self.booking_status,
+            "cancellation_reason": self.cancellation_reason,
             "report_url": self.report_url,
             "created_at": self.created_at.isoformat() if self.created_at else None
         }

@@ -9,6 +9,7 @@ from .lab_booking import LabBooking
 from .lab_test import LabTest
 from .lab_test_pricing import LabTestPricing
 from .payment import PaymentTransaction
+from .vendor_ledger import VendorLedger
 
 __all__ = [
     "CustomerUser",
@@ -21,5 +22,6 @@ __all__ = [
     "LabBooking",
     "LabTest",
     "LabTestPricing",
-    "PaymentTransaction"
+    "PaymentTransaction",
+    "VendorLedger"
 ]

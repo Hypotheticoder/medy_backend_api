@@ -28,3 +28,27 @@ def add_pricing_for_lab(db: Session, lab_id: str, pricing_data: LabTestPricingCr
     db.commit()
     db.refresh(db_pricing)
     return db_pricing
+
+def get_inventory_for_lab(db: Session, lab_id: str):
+    """Fetch the full table of tests offered by this lab."""
+    return db.query(LabTestPricing).filter(LabTestPricing.lab_id == lab_id).all()
+
+def update_lab_pricing(db: Session, pricing_id: str, update_data: dict):
+    """Edit the MRP, Discount, or Turnaround Time for a test."""
+    pricing = db.query(LabTestPricing).filter(LabTestPricing.id == pricing_id).first()
+    if not pricing:
+        return None
+    for key, value in update_data.items():
+        setattr(pricing, key, value)
+    db.commit()
+    db.refresh(pricing)
+    return pricing
+
+def delete_lab_pricing(db: Session, pricing_id: str) -> bool:
+    """Delete a test from this lab's offerings."""
+    pricing = db.query(LabTestPricing).filter(LabTestPricing.id == pricing_id).first()
+    if not pricing:
+        return False
+    db.delete(pricing)
+    db.commit()
+    return True

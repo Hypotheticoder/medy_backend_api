@@ -48,3 +48,19 @@ class LabTestPricingResponse(LabTestPricingCreate):
     
     class Config:
         from_attributes = True
+
+class LabTestPricingUpdate(BaseModel):
+    """Payload sent by a PathLab to update pricing of an existing test."""
+    price: Optional[float] = None
+    discount_percentage: Optional[float] = None
+    final_price: Optional[float] = None
+    turnaround_time_hours: Optional[int] = None
+    home_collection_available: Optional[bool] = None
+    walk_in_available: Optional[bool] = None
+
+class LabInventoryItemResponse(LabTestPricingResponse):
+    """Response model for a lab's inventory list, optionally joining with global test details."""
+    test_details: Optional[LabTestResponse] = None
+
+    class Config:
+        from_attributes = True
