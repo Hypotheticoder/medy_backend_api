@@ -1,43 +1,67 @@
-version: '3.8'
-
+version: '3.11'
 services:
+  redis:
+    image: redis:7-alpine
+    restart: always
+    volumes:
+      - redis_data:/data
+    networks:
+      - medy24_backend_net
+
   db:
     image: postgres:15
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgrespassword
-      POSTGRES_DB: medy_db
-    ports:
-      - "5432:5432"
+    restart: always
+    env_file:
+      - .env
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - medy24_backend_net
 
-  redis:
-    image: redis:alpine
-    ports:
-      - "6379:6379"
-    restart: unless-stopped
-
-  web:
-    build: .
-    ports:
-      - "8000:8000"
+  pgadmin:
+    image: dpage/pgadmin4
+    restart: always
+    env_file:
+      - .env
     environment:
-      - DB_USER=postgres
-      - DB_PASSWORD=postgrespassword
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_NAME=medy_db
-      - REDIS_URL=redis://redis:6379/0
-      # You can add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET here for production
+      PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: "False"
+      PGADMIN_CONFIG_WTF_CSRF_ENABLED: "False"
+      PGADMIN_CONFIG_WTF_CSRF_CHECK_DEFAULT: "False"
+      PGADMIN_CONFIG_PROXY_X_HOST_COUNT: "1"
+      PGADMIN_CONFIG_PROXY_X_FOR_COUNT: "1"
+      PGADMIN_CONFIG_PROXY_X_PROTO_COUNT: "1"
+    ports:
+      - "8025:80"
+    depends_on:
+      - db
+    networks:
+      - medy24_backend_net
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    env_file:
+      - .env
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "8024:8024"
     depends_on:
       - db
       - redis
+    networks:
+      - medy24_backend_net
     volumes:
-      # Mount the uploads folder so files aren't lost when the container restarts
-      - ./uploads:/app/uploads
-    restart: unless-stopped
+      - uploads_data:/app/uploads
 
 volumes:
-  postgres_data:
+  db_data:
+  uploads_data:
+  redis_data:
+
+networks:
+  medy24_backend_net:
+    driver: bridge

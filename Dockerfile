@@ -1,27 +1,26 @@
-# Use an official Python runtime as a parent image
+# Use Python 3.11 slim image
 FROM python:3.11-slim
 
-# Set the working directory in the container
+# Set working directory
 WORKDIR /app
 
-# Install system dependencies required for psycopg2 and other packages
-RUN apt-get update && apt-get install -y \
+# Install system dependencies required by psycopg2-binary
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
-    gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the requirements file into the container
+# Copy requirements and install dependencies
 COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install dependencies. 
-# Explicitly adding psycopg2-binary, python-dotenv, and razorpay in case they are missing from requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt psycopg2-binary python-dotenv razorpay
-
-# Copy the rest of the application code
+# Copy the rest of the application
 COPY . .
 
-# Expose port 8000 for FastAPI
-EXPOSE 8000
+# Create uploads directory so the app doesn't fail on startup
+RUN mkdir -p /app/uploads /app/assets
 
-# Run the FastAPI application using uvicorn
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Expose port 8024 for the FastAPI application
+EXPOSE 8024
+
+# Run migrations, then start the API server
+CMD ["sh", "-c", "python scripts/wait_for_db.py && alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8024"]
