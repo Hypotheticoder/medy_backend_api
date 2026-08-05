@@ -26,3 +26,8 @@ typing-extensions==4.15.0
 typing-inspection==0.4.2
 uvicorn==0.49.0
 psycopg2-binary==2.9.9
+python-dotenv
+requests
+firebase-admin
+bcrypt
+razorpay

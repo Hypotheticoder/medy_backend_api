@@ -22,5 +22,4 @@ RUN mkdir -p /app/uploads /app/assets
 # Expose port 8024 for the FastAPI application
 EXPOSE 8024
 
-# Run migrations, then start the API server
-CMD ["sh", "-c", "python scripts/wait_for_db.py && alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8024"]
+CMD ["sh", "-c", "python scripts/wait_for_db.py && python -c 'import main' && alembic stamp head && uvicorn main:app --host 0.0.0.0 --port 8024"]
