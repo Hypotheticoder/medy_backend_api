@@ -14,9 +14,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ws", tags=["Real-Time Engine"])
 
+import os
+
 class RedisPubSubManager:
-    def __init__(self, redis_url="redis://localhost:6379"):
-        self.redis_url = redis_url
+    def __init__(self):
+        redis_host = os.getenv("REDIS_HOST", "localhost")
+        redis_port = os.getenv("REDIS_PORT", "6379")
+        self.redis_url = os.getenv("REDIS_URL", f"redis://{redis_host}:{redis_port}/0")
         self.redis_client = None
 
     async def connect(self):
