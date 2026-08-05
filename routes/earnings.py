@@ -1,31 +1,70 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
-import logging
 
 from db import get_db
-from schemas.earnings_schemas import VendorLedgerResponse, VendorEarningsSummary
-from crud.earnings import get_vendor_ledger, get_vendor_earnings_summary
+from models.vendor_ledger import VendorLedger
+from models.lab_booking import LabBooking
 
-router = APIRouter(prefix="/api/rest/earnings", tags=["REST - Earnings & Vendor Ledger"])
-logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/api/rest/earnings", tags=["REST - Earnings Dashboard"])
 
-@router.get("/lab/{lab_id}", response_model=List[VendorLedgerResponse])
-def get_lab_ledger(lab_id: str, db: Session = Depends(get_db)):
-    """Fetch the complete transaction history and earnings for a lab."""
-    try:
-        ledger = get_vendor_ledger(db, lab_id)
-        return ledger
-    except Exception as e:
-        logger.error(f"Failed to fetch ledger for lab {lab_id}: {e}")
-        raise HTTPException(status_code=500, detail="Could not fetch earnings.")
+@router.get("/{vendor_type}/{vendor_id}/summary")
+def get_earnings_summary(vendor_type: str, vendor_id: str, db: Session = Depends(get_db)):
+    """
+    Returns a simple, clean summary of total earnings.
+    vendor_type should be 'lab' or 'pharmacy'.
+    """
+    # Earnings from VendorLedger & Net Balance Calculation
+    ledgers = db.query(VendorLedger).filter(
+        VendorLedger.vendor_id == vendor_id,
+        VendorLedger.vendor_type == vendor_type
+    ).all()
 
-@router.get("/lab/{lab_id}/summary", response_model=VendorEarningsSummary)
-def get_lab_earnings_summary(lab_id: str, db: Session = Depends(get_db)):
-    """Fetch the total aggregated earnings, pending, and settled amounts."""
-    try:
-        summary = get_vendor_earnings_summary(db, lab_id)
-        return summary
-    except Exception as e:
-        logger.error(f"Failed to fetch earnings summary for lab {lab_id}: {e}")
-        raise HTTPException(status_code=500, detail="Could not fetch earnings summary.")
+    # Get bookings to check payment mode
+    # Assuming for pharmacy we might need something similar later, but right now we only have LabBooking
+    bookings = db.query(LabBooking).filter(LabBooking.lab_id == vendor_id).all()
+    booking_modes = {b.booking_id: (b.payment_mode or "cod").lower() for b in bookings}
+
+    total_earnings = 0.0
+    amount_platform_owes_lab = 0.0
+    amount_lab_owes_platform = 0.0
+
+    for row in ledgers:
+        total_earnings += row.vendor_earning
+        payment_mode = booking_modes.get(row.order_id, "cod")
+        
+        if payment_mode == "online":
+            amount_platform_owes_lab += row.vendor_earning
+        else: # cod
+            amount_lab_owes_platform += row.platform_commission
+
+    net_balance = amount_platform_owes_lab - amount_lab_owes_platform
+
+    return {
+        "total_earnings": round(total_earnings, 2),
+        "total_platform_owes_lab": round(amount_platform_owes_lab, 2),
+        "total_lab_owes_platform": round(amount_lab_owes_platform, 2),
+        "net_balance": round(net_balance, 2)
+    }
+
+@router.get("/{vendor_type}/{vendor_id}")
+def get_recent_transactions(vendor_type: str, vendor_id: str, db: Session = Depends(get_db)):
+    """
+    Returns the raw list of transactions for the UI list view, hiding complex settlement data.
+    """
+    ledgers = db.query(VendorLedger).filter(
+        VendorLedger.vendor_id == vendor_id,
+        VendorLedger.vendor_type == vendor_type
+    ).order_by(VendorLedger.created_at.desc()).limit(20).all()
+
+    # We manually build the dict to hide internal tracking columns like platform_commission
+    return [
+        {
+            "ledger_id": row.ledger_id,
+            "order_id": row.order_id,
+            "total_customer_paid": row.total_customer_paid,
+            "vendor_earning": row.vendor_earning,
+            "created_at": row.created_at.isoformat() if row.created_at else None
+        }
+        for row in ledgers
+    ]

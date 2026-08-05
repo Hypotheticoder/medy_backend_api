@@ -7,15 +7,12 @@ class VendorLedgerType:
     ledger_id: str
     order_id: str
     total_customer_paid: float
-    platform_commission: float # (You might want to hide this from the vendor app later!)
     vendor_earning: float
-    settlement_status: str
     created_at: Optional[str] = None
 
 @strawberry.type
 class DashboardEarningsType:
     """The master data type that powers the top of the Vendor's screen."""
     total_lifetime_earnings: float
-    pending_bank_payouts: float
     total_orders_completed: int
     recent_transactions: List[VendorLedgerType]

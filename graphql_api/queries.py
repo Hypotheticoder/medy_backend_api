@@ -36,8 +36,19 @@ class Query:
         db_query = db.query(Medicine)
         
         if query:
+            from sqlalchemy import case
             # Case-insensitive search using ILIKE
             db_query = db_query.filter(Medicine.medicine_name.ilike(f"%{query}%"))
+            # Sort exact matches first, then prefix matches, then others
+            db_query = db_query.order_by(
+                case(
+                    (Medicine.medicine_name.ilike(query), 1),
+                    (Medicine.medicine_name.ilike(f"{query} %"), 2),
+                    (Medicine.medicine_name.ilike(f"{query}%"), 3),
+                    else_=4
+                ),
+                Medicine.medicine_name.asc()
+            )
         
         if category:
             db_query = db_query.filter(Medicine.medicine_category == category)
@@ -285,7 +296,7 @@ class Query:
         Works for BOTH Labs and Pharmacies!
         vendor_type must be either 'lab' or 'pharmacy'
         """
-        from models.vendor_ledger import VendorLedger # Import the model
+        from models.vendor_ledger import VendorLedger
         db = info.context["db"]
         
         # 1. Fetch all rows for this specific vendor
@@ -295,30 +306,24 @@ class Query:
         ).order_by(VendorLedger.created_at.desc()).all()
         
         total_earnings = 0.0
-        pending_payouts = 0.0
         
-        # 2. Do the math securely on the backend
+        # 2. Simple addition, no pending logic!
         for row in ledgers:
             total_earnings += row.vendor_earning
-            if row.settlement_status in ["pending_clearance", "ready_for_payout"]:
-                pending_payouts += row.vendor_earning
                 
-        # 3. Format the recent transactions for the list view below the cards
+        # 3. Format the recent transactions without the settlement status
         recent_txns = []
-        for row in ledgers[:10]: # Only send the 10 most recent to keep the app fast
+        for row in ledgers[:10]:
             recent_txns.append(VendorLedgerType(
                 ledger_id=row.ledger_id,
                 order_id=row.order_id,
                 total_customer_paid=row.total_customer_paid,
-                platform_commission=row.platform_commission,
                 vendor_earning=row.vendor_earning,
-                settlement_status=row.settlement_status,
                 created_at=row.created_at.isoformat() if row.created_at else ""
             ))
             
         return DashboardEarningsType(
             total_lifetime_earnings=round(total_earnings, 2),
-            pending_bank_payouts=round(pending_payouts, 2),
             total_orders_completed=len(ledgers),
             recent_transactions=recent_txns
         )

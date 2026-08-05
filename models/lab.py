@@ -22,6 +22,7 @@ class LabUser(Base):
     is_verified = Column(Boolean, default=False, nullable=False)
     is_accepting_bookings = Column(Boolean, default=True, nullable=False)
     rating = Column(Float, default=5.0, nullable=False)
+    platform_commission_rate = Column(Float, default=0.20, nullable=False)
     
     # Extra columns for registration
     password = Column(String, nullable=False)

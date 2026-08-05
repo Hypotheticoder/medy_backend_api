@@ -1,8 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from models.vendor_ledger import VendorLedger
-
-PLATFORM_COMMISSION_RATE = 0.20 # 20% commission
+from models.lab import LabUser
 
 def generate_earning_record(db: Session, vendor_id: str, vendor_type: str, order_id: str, total_amount: float):
     """
@@ -14,7 +13,17 @@ def generate_earning_record(db: Session, vendor_id: str, vendor_type: str, order
     if existing:
         return existing
 
-    commission = total_amount * PLATFORM_COMMISSION_RATE
+    # Fetch dynamic commission rate from the vendor's profile
+    commission_rate = 0.20 # Fallback
+    if vendor_type == "lab":
+        lab = db.query(LabUser).filter(LabUser.lab_id == vendor_id).first()
+        if lab:
+            commission_rate = lab.platform_commission_rate
+    elif vendor_type == "pharma":
+        # Placeholder for pharma shop dynamic commission
+        commission_rate = 0.20
+
+    commission = total_amount * commission_rate
     vendor_earning = total_amount - commission
 
     ledger_entry = VendorLedger(
