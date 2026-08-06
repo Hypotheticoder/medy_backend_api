@@ -273,6 +273,29 @@ async def shop_bidding_endpoint(websocket: WebSocket, shop_id: str):
                     await redis_manager.publish_bid(order_id, bid_payload)
                     await websocket.send_json({"type": "BID_RECEIVED", "status": "success"})
 
+            elif action == "REJECT_ORDER":
+                order_id = raw_data.get("order_id")
+                new_bid_id = generate_bid_id()
+                db = SessionLocal()
+                try:
+                    # Check if already bid
+                    existing = db.query(OrderBid).filter(OrderBid.shop_id == shop_id, OrderBid.order_id == order_id).first()
+                    if not existing:
+                        new_bid = OrderBid(
+                            bid_id=new_bid_id,
+                            order_id=order_id,
+                            shop_id=shop_id,
+                            total_bid_price=0.0,
+                            bid_status="rejected"
+                        )
+                        db.add(new_bid)
+                        db.commit()
+                except Exception as e:
+                    logger.error(f"Error rejecting order: {e}")
+                    db.rollback()
+                finally:
+                    db.close()
+
     except WebSocketDisconnect:
         manager.disconnect(websocket, manager.active_shops, shop_id)
         listener_task.cancel()

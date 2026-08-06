@@ -88,6 +88,8 @@ class Order(Base):
             "shop_lng": self.shop.longitude if self.shop else None,
             "order_type": self.order_type,
             "order_status": self.order_status,
+            "receiver_name": self.receiver_name,
+            "receiver_phone": self.receiver_phone,
             "delivery_address": self.delivery_address,
             "delivery_lat": self.delivery_lat,
             "delivery_lng": self.delivery_lng,
