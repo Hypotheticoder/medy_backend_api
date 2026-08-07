@@ -1,7 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 import logging
+import csv
+import io
 
 from db import get_db
 from schemas.lab_test_schemas import LabTestCreate, LabTestResponse, LabTestPricingCreate, LabTestPricingResponse, LabTestPricingUpdate, LabInventoryItemResponse
@@ -93,3 +96,94 @@ def remove_test_from_inventory(pricing_id: str, db: Session = Depends(get_db)):
     if not success:
         raise HTTPException(status_code=404, detail="Pricing item not found.")
     return {"status": "success", "message": "Test removed from inventory."}
+
+@router.post("/global/upload-csv")
+async def upload_labtest_csv(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """
+    Admin Only: Upload a CSV file to bulk import lab tests to the global catalog.
+    Expected CSV Headers: 
+    test_name, category, description, is_profile, number_of_parameters, sample_type, search_tags, fasting_required, fasting_hours, pre_test_info
+    """
+    from models.lab_test import generate_test_id
+    
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="Only .csv files are supported.")
+
+    try:
+        contents = await file.read()
+        decoded_content = contents.decode('utf-8-sig') 
+        csv_reader = csv.DictReader(io.StringIO(decoded_content))
+        
+        required_headers = ['test_name', 'category']
+        headers = [h.strip().lower() for h in (csv_reader.fieldnames or [])]
+        
+        missing_headers = [h for h in required_headers if h not in headers]
+        if missing_headers:
+            raise HTTPException(status_code=400, detail=f"Missing required CSV headers: {missing_headers}")
+
+        actual_to_lower = {h: h.strip().lower() for h in (csv_reader.fieldnames or [])}
+        
+        tests_to_insert = []
+        row_count = 0
+        
+        for row in csv_reader:
+            clean_row = {actual_to_lower[k]: v for k, v in row.items() if k}
+
+            raw_name = clean_row.get('test_name', '')
+            raw_category = clean_row.get('category', '')
+            if not raw_name or str(raw_name).strip() == '' or not raw_category or str(raw_category).strip() == '':
+                continue
+
+            try:
+                # Booleans
+                prof_str = str(clean_row.get('is_profile', 'false')).strip().lower()
+                is_prof = prof_str in ['true', 'yes', '1', 'y']
+                
+                fast_str = str(clean_row.get('fasting_required', 'false')).strip().lower()
+                is_fasting = fast_str in ['true', 'yes', '1', 'y']
+                
+                # Integer
+                num_params_raw = clean_row.get('number_of_parameters', 1)
+                try:
+                    num_params = int(num_params_raw) if num_params_raw else 1
+                except ValueError:
+                    num_params = 1
+
+                new_test = LabTest(
+                    test_id=generate_test_id(),
+                    test_name=str(raw_name).strip(),
+                    category=str(raw_category).strip(),
+                    description=str(clean_row.get('description', '')).strip() or None,
+                    is_profile=is_prof,
+                    number_of_parameters=num_params,
+                    sample_type=str(clean_row.get('sample_type', '')).strip() or None,
+                    search_tags=str(clean_row.get('search_tags', '')).strip() or None,
+                    fasting_required=is_fasting,
+                    fasting_hours=str(clean_row.get('fasting_hours', '')).strip() or None,
+                    pre_test_info=str(clean_row.get('pre_test_info', '')).strip() or None
+                )
+                tests_to_insert.append(new_test)
+                row_count += 1
+                
+            except ValueError as ve:
+                logger.error(f"Row skipped due to parsing error (Row {row_count + 1}): {ve}")
+                continue 
+
+        if tests_to_insert:
+            db.bulk_save_objects(tests_to_insert)
+            db.commit()
+            
+        return {
+            "status": "success",
+            "message": f"Successfully imported {row_count} lab tests.",
+            "imported_count": row_count
+        }
+        
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Database integrity error. Check for duplicate IDs or invalid data.")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Fatal CSV Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to process CSV: {str(e)}")
+
