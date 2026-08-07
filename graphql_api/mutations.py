@@ -31,7 +31,9 @@ class Mutation:
             db.add(cart)
             db.flush() # To get it added to session before modifying JSON
             
-        items = cart.items.copy() if cart.items else []
+        import copy
+        from sqlalchemy.orm.attributes import flag_modified
+        items = copy.deepcopy(cart.items) if cart.items else []
         
         # Check if item already in cart
         found = False
@@ -55,6 +57,7 @@ class Mutation:
         # Recalculate total price
         cart.total_price = sum(float(item["price"]) * int(item["quantity"]) for item in cart.items)
         
+        flag_modified(cart, "items")
         db.commit()
         db.refresh(cart)
         return cart
@@ -62,12 +65,15 @@ class Mutation:
     @strawberry.mutation
     def update_cart_quantity(self, info: Info, customer_id: str, medicine_id: str, quantity: int) -> CartType:
         """Updates the quantity of a specific item in the cart. If quantity is 0, removes the item."""
+        import copy
+        from sqlalchemy.orm.attributes import flag_modified
+        
         db = info.context["db"]
         cart = db.query(Cart).filter(Cart.customer_id == customer_id).first()
         if not cart:
             raise Exception("Cart not found")
             
-        items = cart.items.copy() if cart.items else []
+        items = copy.deepcopy(cart.items) if cart.items else []
         
         if quantity <= 0:
             items = [item for item in items if item.get("medicine_id") != medicine_id]
@@ -80,6 +86,7 @@ class Mutation:
         cart.items = items
         cart.total_price = sum(float(item["price"]) * int(item["quantity"]) for item in cart.items)
         
+        flag_modified(cart, "items")
         db.commit()
         db.refresh(cart)
         return cart
@@ -87,6 +94,7 @@ class Mutation:
     @strawberry.mutation
     def remove_from_cart(self, info: Info, customer_id: str, medicine_id: str) -> CartType:
         """Removes a medicine completely from the customer's cart."""
+        from sqlalchemy.orm.attributes import flag_modified
         db = info.context["db"]
         cart = db.query(Cart).filter(Cart.customer_id == customer_id).first()
         if not cart:
@@ -96,6 +104,7 @@ class Mutation:
         cart.items = items
         cart.total_price = sum(float(item["price"]) * int(item["quantity"]) for item in cart.items)
         
+        flag_modified(cart, "items")
         db.commit()
         db.refresh(cart)
         return cart
