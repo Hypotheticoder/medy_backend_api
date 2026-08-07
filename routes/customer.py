@@ -50,3 +50,30 @@ async def update_customer_profile(
     response_data['saved_addresses'] = customer.saved_addresses or []
     return response_data
 
+@router.post("/logout/{customer_id}")
+def logout_customer(customer_id: str, db: Session = Depends(get_db)):
+    """Logout Customer (Clears device tokens if any)"""
+    customer = db.query(CustomerUser).filter(CustomerUser.customer_id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+        
+    # In the future, clear FCM tokens or session identifiers here
+    
+    return {"status": "success", "message": "Logged out successfully"}
+
+@router.delete("/profile/{customer_id}")
+def delete_customer_account(customer_id: str, db: Session = Depends(get_db)):
+    """Delete Customer Account (Soft Delete to preserve order history)"""
+    customer = db.query(CustomerUser).filter(CustomerUser.customer_id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+        
+    # Soft delete to prevent foreign key constraint failures on past orders
+    customer.status = "deleted"
+    customer.firebase_uid = None # Unlink from Firebase so they can't log in
+    # Optionally anonymize data:
+    # customer.name = "Deleted User"
+    # customer.phone = f"deleted_{customer.customer_id}" 
+    
+    db.commit()
+    return {"status": "success", "message": "Account deleted successfully"}
