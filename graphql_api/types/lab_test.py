@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional, List
 import strawberry
+from strawberry.scalars import JSON
 
 @strawberry.type
 class LabTestPricingType:
@@ -8,9 +9,9 @@ class LabTestPricingType:
     id: str
     lab_id: str
     test_id: str
-    lab_base_rate: float
-    customer_selling_price: float
     mrp: float
+    discount_percent: float
+    final_price: float
     turnaround_time_hours: int
     home_collection_available: bool
     walk_in_available: bool
@@ -29,10 +30,17 @@ class LabTestType:
     fasting_required: bool
     fasting_hours: Optional[str]
     pre_test_info: Optional[str]
+    
+    # 🚨 NEW: Expose Package details to the Flutter App
+    is_package: bool
+    included_tests: Optional[JSON]
+    target_gender: str
+    target_age_group: Optional[str]
 
 @strawberry.type
 class LabInventoryItemType:
     """Combined view for Lab Inventory including Test Info and Pricing."""
+    id: str
     test_id: str
     test_name: str
     category: str
@@ -45,10 +53,15 @@ class LabInventoryItemType:
     fasting_hours: Optional[str]
     pre_test_info: Optional[str]
     
+    # Package properties
+    is_package: bool
+    included_tests: Optional[JSON]
+    
     # Pricing info
-    price: float
-    discount_percentage: float
+    mrp: float
+    discount_percent: float
     final_price: float
+    customer_selling_price: float
     lab_id: str
 
 # ==========================================
@@ -76,3 +89,12 @@ class LabPackageType:
     missing_tests: List[MissingTestType]
     is_full_match: bool
     match_count: int
+
+@strawberry.type
+class FeaturedPackageType:
+    """Used specifically for the Home Screen Cards."""
+    test_id: str
+    test_name: str
+    number_of_parameters: int
+    starting_price: float # The cheapest price available right now!
+    category: str

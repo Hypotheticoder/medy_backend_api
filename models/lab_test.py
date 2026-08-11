@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Float, Boolean, Text, DateTime, ForeignKey, Integer
+from sqlalchemy import Column, String, Float, Boolean, Text, DateTime, ForeignKey, Integer, JSON
 from sqlalchemy.sql import func
 from db import Base
 import uuid
@@ -23,6 +23,13 @@ class LabTest(Base):
     # NEW: UX Details for Premium Look
     is_profile = Column(Boolean, default=False) # True for "Thyroid Profile" (multi-test), False for single tests
     number_of_parameters = Column(Integer, default=1) # e.g., 27 parameters in a CBC
+    
+    # 🚨 NEW: PACKAGE SPECIFIC COLUMNS
+    is_package = Column(Boolean, default=False) # True for "Full Body Checkup"
+    included_tests = Column(JSON, nullable=True) # e.g., ["CBC", "Lipid Profile", "Liver Function"]
+    target_gender = Column(String, default="Both") # "Male", "Female", "Both" (For marketing filters)
+    target_age_group = Column(String, nullable=True) # e.g., "40-60 Years"
+    
     sample_type = Column(String, nullable=True) # e.g., "Blood", "Urine", "Stool", "Swab"
     
     # 🪄 MAGIC: Hidden Search Tags for customers who don't know medical terms

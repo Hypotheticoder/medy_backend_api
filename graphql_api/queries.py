@@ -1,10 +1,10 @@
 import strawberry
 from typing import List, Optional
 from strawberry.types import Info
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 
 from graphql_api.types import MedicineType, OrderType, PharmaShopType, CartType
-from graphql_api.types import LabBookingType, LabTestType, LabPackageType, MatchedTestType, MissingTestType, LabUserType, VendorLedgerType, DashboardEarningsType
+from graphql_api.types import LabBookingType, LabTestType, LabPackageType, MatchedTestType, MissingTestType, LabUserType, VendorLedgerType, DashboardEarningsType, FeaturedPackageType
 from graphql_api.types.lab_test import LabInventoryItemType
 
 from models.medicine import Medicine
@@ -18,6 +18,37 @@ from models.lab_booking import LabBooking
 
 @strawberry.type
 class Query:
+    
+    @strawberry.field
+    def get_featured_packages(self, info: Info, limit: int = 5) -> List[FeaturedPackageType]:
+        """Powers the 'Health Packages For You' carousel on the Home Screen."""
+        db = info.context["db"]
+        
+        # 1. Find packages that are NOT lab-branded (Admin packages only)
+        global_packages = db.query(LabTest).filter(
+            LabTest.is_package == True,
+            LabTest.category != "Lab Branded Packages"
+        ).limit(limit).all()
+        
+        results = []
+        for pkg in global_packages:
+            # 2. Find the cheapest price any lab is currently offering for this package
+            cheapest_pricing = db.query(func.min(LabTestPricing.customer_selling_price)).filter(
+                LabTestPricing.test_id == pkg.test_id
+            ).scalar()
+            
+            # Default to 0 if no lab is selling it yet
+            starting_price = cheapest_pricing if cheapest_pricing is not None else 0.0
+            
+            results.append(FeaturedPackageType(
+                test_id=pkg.test_id,
+                test_name=pkg.test_name,
+                number_of_parameters=pkg.number_of_parameters,
+                starting_price=starting_price,
+                category=pkg.category
+            ))
+            
+        return results
     
     @strawberry.field
     def search_medicines(
@@ -202,9 +233,9 @@ class Query:
                 matched.append(MatchedTestType(
                     test_id=offer.test_id,
                     test_name=test_dict.get(offer.test_id, "Unknown Test"),
-                    price=offer.final_price
+                    price=offer.customer_selling_price
                 ))
-                total_price += offer.final_price
+                total_price += offer.customer_selling_price
                 offered_test_ids.add(offer.test_id)
                 
             # Find the missing ones
@@ -253,6 +284,7 @@ class Query:
         inventory = []
         for test, pricing in results:
             inventory.append(LabInventoryItemType(
+                id=pricing.id,
                 test_id=test.test_id,
                 test_name=test.test_name,
                 category=test.category,
@@ -264,12 +296,22 @@ class Query:
                 fasting_required=test.fasting_required,
                 fasting_hours=test.fasting_hours,
                 pre_test_info=test.pre_test_info,
-                price=pricing.price,
-                discount_percentage=pricing.discount_percentage,
-                final_price=pricing.final_price,
+                is_package=test.is_package,
+                included_tests=test.included_tests,
+                discount_percent=round(((pricing.mrp - pricing.customer_selling_price) / pricing.mrp * 100), 2) if pricing.mrp > 0 else 0.0,
+                final_price=pricing.customer_selling_price,
+                customer_selling_price=pricing.customer_selling_price,
+                mrp=pricing.mrp,
                 lab_id=pricing.lab_id
             ))
         return inventory
+        
+    @strawberry.field
+    def tests_by_lab(self, info: Info, lab_id: str, limit: int = 5) -> List[LabInventoryItemType]:
+        """Alias for get_lab_inventory specifically tailored for the FetchMoreFromLab query."""
+        # pyrefly: ignore [unexpected-keyword]
+        return self.get_lab_inventory(info=info, lab_id=lab_id, limit=limit, offset=0)
+
 
     # ==========================================
     # LAB BOOKING HISTORY

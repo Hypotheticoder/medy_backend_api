@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 import logging
@@ -7,12 +8,13 @@ import csv
 import io
 
 from db import get_db
-from schemas.lab_test_schemas import LabTestCreate, LabTestResponse, LabTestPricingCreate, LabTestPricingResponse, LabTestPricingUpdate, LabInventoryItemResponse
+from schemas.lab_test_schemas import LabTestCreate, LabTestResponse, LabTestPricingCreate, LabTestPricingResponse, LabTestPricingUpdate, LabInventoryItemResponse, CustomLabPackageCreate, CustomLabPackageUpdate
 from crud.lab_test import create_global_test, add_pricing_for_lab, get_inventory_for_lab, update_lab_pricing, delete_lab_pricing
 
 # 🚨 Import the models so we can run our validation checks!
-from models.lab_test import LabTest
+from models.lab_test import LabTest, generate_test_id
 from models.lab_test_pricing import LabTestPricing 
+from models.lab import LabUser
 
 router = APIRouter(prefix="/api/rest/lab-inventory", tags=["REST - Lab Inventory"])
 logger = logging.getLogger(__name__)
@@ -187,3 +189,95 @@ async def upload_labtest_csv(file: UploadFile = File(...), db: Session = Depends
         logger.error(f"Fatal CSV Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to process CSV: {str(e)}")
 
+
+@router.post("/custom-package/{lab_id}")
+def create_custom_lab_package(lab_id: str, payload: CustomLabPackageCreate, db: Session = Depends(get_db)):
+    """Allows a Lab to bundle existing global tests into their own branded package."""
+    
+    # 1. Verify the Lab exists
+    lab = db.query(LabUser).filter(LabUser.lab_id == lab_id).first()
+    if not lab:
+        raise HTTPException(status_code=404, detail="Lab not found")
+        
+    # 2. Fetch the names of the tests they selected to build the JSON array
+    included_tests = db.query(LabTest).filter(LabTest.test_id.in_(payload.included_test_ids)).all()
+    if len(included_tests) != len(payload.included_test_ids):
+        raise HTTPException(status_code=400, detail="One or more selected tests do not exist in the global catalog.")
+        
+    test_info_list = [{"test_id": t.test_id, "test_name": t.test_name} for t in included_tests]
+    
+    # 3. Create the "Super Test" in the Global Dictionary (Tagged as Lab Branded)
+    new_package = LabTest(
+        test_id=generate_test_id(),
+        test_name=payload.package_name,
+        category="Lab Branded Packages", # Keeps the global catalog clean!
+        description=payload.description,
+        is_package=True,
+        included_tests=test_info_list, # Saves the array [{"test_id": "...", "test_name": "..."}]
+        number_of_parameters=len(test_info_list)
+    )
+    db.add(new_package)
+    db.flush() # Get the new test_id safely
+    
+    # 4. Calculate Final Price
+    discount_amt = payload.price * (payload.discount_percentage / 100)
+    final_price = round(payload.price - discount_amt, 2)
+    
+    # 5. Instantly add it to THIS specific Lab's inventory
+    new_pricing = LabTestPricing(
+        lab_id=lab_id,
+        test_id=new_package.test_id,
+        mrp=payload.price,
+        customer_selling_price=final_price,
+        lab_base_rate=final_price,
+        turnaround_time_hours=payload.turnaround_time_hours
+    )
+    db.add(new_pricing)
+    db.commit()
+    
+    return {
+        "status": "success", 
+        "message": "Custom package created and added to inventory!",
+        "package_id": new_package.test_id
+    }
+
+@router.put("/custom-package/{test_id}/{lab_id}")
+def update_custom_lab_package(test_id: str, lab_id: str, payload: CustomLabPackageUpdate, db: Session = Depends(get_db)):
+    """Allows a Lab to update the name, description, and included tests of their own branded package."""
+    # 1. Verify the Lab exists
+    lab = db.query(LabUser).filter(LabUser.lab_id == lab_id).first()
+    if not lab:
+        raise HTTPException(status_code=404, detail="Lab not found")
+        
+    # 2. Fetch the test and verify it belongs to the lab (pricing entry) and is a custom package
+    pricing = db.query(LabTestPricing).filter(LabTestPricing.lab_id == lab_id, LabTestPricing.test_id == test_id).first()
+    if not pricing:
+        raise HTTPException(status_code=404, detail="Package not found in lab inventory")
+        
+    package = db.query(LabTest).filter(LabTest.test_id == test_id).first()
+    if not package or not package.is_package or package.category != "Lab Branded Packages":
+        raise HTTPException(status_code=400, detail="Only custom lab branded packages can be modified.")
+        
+    # 3. Update basic fields
+    if payload.package_name is not None:
+        package.test_name = payload.package_name
+    if payload.description is not None:
+        package.description = payload.description
+        
+    # 4. Update tests if provided
+    if payload.included_test_ids is not None:
+        included_tests = db.query(LabTest).filter(LabTest.test_id.in_(payload.included_test_ids)).all()
+        if len(included_tests) != len(payload.included_test_ids):
+            raise HTTPException(status_code=400, detail="One or more selected tests do not exist in the global catalog.")
+            
+        test_info_list = [{"test_id": t.test_id, "test_name": t.test_name} for t in included_tests]
+        package.included_tests = test_info_list
+        package.number_of_parameters = len(test_info_list)
+        flag_modified(package, "included_tests")
+        
+    db.commit()
+    
+    return {
+        "status": "success",
+        "message": "Custom package updated successfully!"
+    }

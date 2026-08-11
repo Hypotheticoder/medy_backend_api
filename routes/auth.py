@@ -251,12 +251,17 @@ def get_lab_by_id(lab_id: str, db: Session = Depends(get_db)):
 @router.put("/lab/update-by/{lab_id}", response_model=LabProfileResponse)
 def update_lab_profile(
     lab_id: str,
+    lab_name: str = Form(None),
+    phone: str = Form(None),
     email: str = Form(None),
     address: str = Form(None),
     latitude: float = Form(None),
     longitude: float = Form(None),
     emergency_contact_number: str = Form(None),
     whatsapp_number: str = Form(None),
+    pan_number: str = Form(None),
+    nabl_accreditation_number: str = Form(None),
+    gst_number: str = Form(None),
     is_accepting_bookings: bool = Form(None),
     lab_image: UploadFile = File(None),
     registration_certificate: UploadFile = File(None),
@@ -268,12 +273,17 @@ def update_lab_profile(
     if not lab:
         raise HTTPException(status_code=404, detail="Lab not found")
         
+    if lab_name is not None: lab.lab_name = lab_name
+    if phone is not None: lab.phone = phone
     if email is not None: lab.email = email
     if address is not None: lab.address = address
     if latitude is not None: lab.latitude = latitude
     if longitude is not None: lab.longitude = longitude
     if emergency_contact_number is not None: lab.emergency_contact_number = emergency_contact_number
     if whatsapp_number is not None: lab.whatsapp_number = whatsapp_number
+    if pan_number is not None: lab.pan_number = pan_number
+    if nabl_accreditation_number is not None: lab.nabl_accreditation_number = nabl_accreditation_number
+    if gst_number is not None: lab.gst_number = gst_number
     if is_accepting_bookings is not None: lab.is_accepting_bookings = is_accepting_bookings
     
     lab_name_safe = "".join(c if c.isalnum() else "_" for c in lab.lab_name)

@@ -4,7 +4,7 @@ from .order_bid import OrderBidType
 from .order import OrderType
 from .cart import CartType
 from .lab_booking import LabBookingType
-from .lab_test import LabTestType, LabTestPricingType, MatchedTestType, MissingTestType, LabPackageType
+from .lab_test import LabTestType, LabTestPricingType, MatchedTestType, MissingTestType, LabPackageType, FeaturedPackageType
 from .lab_user import LabUserType
 from .vendor_ledger import VendorLedgerType, DashboardEarningsType
 
@@ -22,5 +22,6 @@ __all__ = [
     "LabPackageType",
     "LabUserType",
     "VendorLedgerType",
-    "DashboardEarningsType"
+    "DashboardEarningsType",
+    "FeaturedPackageType"
 ]
