@@ -22,8 +22,19 @@ from schemas.auth import (
     AdminCreateShopRequest,
     LabProfileResponse,
     AdminCreateLabRequest,
-    CheckPhoneRequest
+    CheckPhoneRequest,
+    SendOtpRequest,
+    VerifyOtpRequest
 )
+
+import requests
+import random
+from datetime import datetime, timedelta
+
+# Simple in-memory OTP store for development
+# In production, use Redis.
+otp_store = {}
+APITXT_AUTH_KEY = os.getenv("APITXT_AUTH_KEY")
 
 logger = logging.getLogger(__name__)
 
@@ -53,55 +64,125 @@ def check_customer_phone(payload: CheckPhoneRequest, db: Session = Depends(get_d
     }
 
 # ==========================================
-# 1. CUSTOMER AUTHENTICATION (Firebase OTP)
+# 1. CUSTOMER AUTHENTICATION (Firebase OTP - COMMENTED OUT)
 # ==========================================
-# 🚨 THE FIX: Replaced payload with a secure Authorization header
-@router.post("/customer/login", response_model=TokenResponse)
-def customer_login(authorization: str = Header(...), db: Session = Depends(get_db)):
-    """
-    Flutter app sends the Firebase ID Token in the Authorization header:
-    "Bearer <firebase_id_token>"
-    """
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid authorization header format")
-        
-    firebase_token = authorization.split("Bearer ")[1]
-    
-    try:
-        # 1. Verify the token with Google's servers
-        decoded_token = auth.verify_id_token(firebase_token)
-        
-        # 2. Extract the real UID and Phone Number from the verified token
-        firebase_uid = decoded_token.get("uid")
-        phone = decoded_token.get("phone_number")
-        
-        if not phone:
-             raise HTTPException(status_code=400, detail="No phone number linked to this Firebase account")
-             
-    except Exception as e:
-        logger.error(f"Firebase verification failed: {e}")
-        raise HTTPException(status_code=401, detail="Invalid or expired Firebase token")
+# @router.post("/customer/login", response_model=TokenResponse)
+# def customer_login(authorization: str = Header(...), db: Session = Depends(get_db)):
+#     """
+#     Flutter app sends the Firebase ID Token in the Authorization header:
+#     "Bearer <firebase_id_token>"
+#     """
+#     if not authorization.startswith("Bearer "):
+#         raise HTTPException(status_code=401, detail="Invalid authorization header format")
+#         
+#     firebase_token = authorization.split("Bearer ")[1]
+#     
+#     try:
+#         # 1. Verify the token with Google's servers
+#         decoded_token = auth.verify_id_token(firebase_token)
+#         
+#         # 2. Extract the real UID and Phone Number from the verified token
+#         firebase_uid = decoded_token.get("uid")
+#         phone = decoded_token.get("phone_number")
+#         
+#         if not phone:
+#              raise HTTPException(status_code=400, detail="No phone number linked to this Firebase account")
+#              
+#     except Exception as e:
+#         logger.error(f"Firebase verification failed: {e}")
+#         raise HTTPException(status_code=401, detail="Invalid or expired Firebase token")
+# 
+#     # 3. Find or Create the user in our PostgreSQL database
+#     customer = db.query(CustomerUser).filter(CustomerUser.phone == phone).first()
+#     
+#     if not customer:
+#         customer = CustomerUser(
+#             customer_id=generate_customer_id(),
+#             firebase_uid=firebase_uid,
+#             phone=phone,
+#             name="New User", # They can update this in their profile later
+#             status="active"
+#         )
+#         db.add(customer)
+#         db.commit()
+#         db.refresh(customer)
+#     elif customer.firebase_uid != firebase_uid:
+#         # Failsafe: Sync the UID if it changed (rare)
+#         customer.firebase_uid = firebase_uid
+#         db.commit()
+#     
+#     # 4. Generate Medy's own JWT Session Token
+#     access_token = create_access_token(data={"sub": customer.customer_id, "role": "customer"})
+#     
+#     return {
+#         "access_token": access_token, 
+#         "user_id": customer.customer_id, 
+#         "user_type": "customer"
+#     }
 
-    # 3. Find or Create the user in our PostgreSQL database
-    customer = db.query(CustomerUser).filter(CustomerUser.phone == phone).first()
+# ==========================================
+# 1. CUSTOMER AUTHENTICATION (APITxT OTP)
+# ==========================================
+@router.post("/customer/send-otp")
+def send_customer_otp(payload: SendOtpRequest):
+    phone = payload.phone
+    if phone.startswith("+"):
+        phone = phone[1:] # Remove + sign if present
+        
+    otp = str(random.randint(100000, 999999))
+    
+    otp_store[phone] = {
+        "otp": otp,
+        "expires_at": datetime.now() + timedelta(minutes=5)
+    }
+    
+    url = f"https://apitxt.com/api/sendOTP?authkey={APITXT_AUTH_KEY}&mobile={phone}&otp={otp}"
+    try:
+        response = requests.get(url)
+        response_data = response.text
+        logger.info(f"APITxT response: {response_data}")
+        return {"status": "success", "message": "OTP sent successfully"}
+    except Exception as e:
+        logger.error(f"Failed to send OTP via APITxT: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send OTP")
+
+@router.post("/customer/verify-otp", response_model=TokenResponse)
+def verify_customer_otp(payload: VerifyOtpRequest, db: Session = Depends(get_db)):
+    phone = payload.phone
+    if phone.startswith("+"):
+        phone = phone[1:]
+
+    stored = otp_store.get(phone)
+    if not stored:
+        raise HTTPException(status_code=400, detail="OTP not sent or expired")
+        
+    if datetime.now() > stored["expires_at"]:
+        del otp_store[phone]
+        raise HTTPException(status_code=400, detail="OTP expired")
+        
+    if stored["otp"] != payload.otp:
+        raise HTTPException(status_code=401, detail="Invalid OTP")
+        
+    # Valid OTP
+    del otp_store[phone]
+    
+    # Prefix with + for database consistency if needed
+    db_phone = "+" + phone if not phone.startswith("+") else phone
+
+    customer = db.query(CustomerUser).filter(CustomerUser.phone == db_phone).first()
     
     if not customer:
         customer = CustomerUser(
             customer_id=generate_customer_id(),
-            firebase_uid=firebase_uid,
-            phone=phone,
-            name="New User", # They can update this in their profile later
+            firebase_uid="apitxt_auth_" + db_phone,
+            phone=db_phone,
+            name="New User",
             status="active"
         )
         db.add(customer)
         db.commit()
         db.refresh(customer)
-    elif customer.firebase_uid != firebase_uid:
-        # Failsafe: Sync the UID if it changed (rare)
-        customer.firebase_uid = firebase_uid
-        db.commit()
-    
-    # 4. Generate Medy's own JWT Session Token
+        
     access_token = create_access_token(data={"sub": customer.customer_id, "role": "customer"})
     
     return {

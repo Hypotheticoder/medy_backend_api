@@ -65,6 +65,13 @@ class CheckPhoneRequest(BaseModel):
     """Payload to check if a phone number exists before sending OTP"""
     phone: str
 
+class SendOtpRequest(BaseModel):
+    phone: str
+
+class VerifyOtpRequest(BaseModel):
+    phone: str
+    otp: str
+
 class LabProfileResponse(BaseModel):
     """Payload representing a Lab User's Profile"""
     lab_id: str
