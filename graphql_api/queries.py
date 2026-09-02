@@ -20,6 +20,17 @@ from models.lab_booking import LabBooking
 class Query:
     
     @strawberry.field
+    def get_popular_brands(self, info: Info, limit: int = 20) -> List[str]:
+        """Fetches a list of popular manufacturers/brands."""
+        db = info.context["db"]
+        from models.medicine import Medicine
+        brands = db.query(Medicine.manufacturer).filter(
+            Medicine.manufacturer.isnot(None),
+            Medicine.manufacturer != ""
+        ).distinct().limit(limit).all()
+        return [brand[0] for brand in brands if brand[0]]
+
+    @strawberry.field
     def get_featured_packages(self, info: Info, limit: int = 5) -> List[FeaturedPackageType]:
         """Powers the 'Health Packages For You' carousel on the Home Screen."""
         db = info.context["db"]
@@ -162,6 +173,18 @@ class Query:
     def get_core_test_by_id(self, info: Info, test_id: str) -> Optional[LabTestType]:
         db = info.context["db"]
         return db.query(LabTest).filter(LabTest.test_id == test_id).first()
+
+
+    @strawberry.field
+    def get_lab_test_categories(self, info: Info, limit: int = 20) -> List[str]:
+        """Fetches a list of unique lab test categories."""
+        db = info.context["db"]
+        from models.lab_test import LabTest
+        categories = db.query(LabTest.category).filter(
+            LabTest.category.isnot(None),
+            LabTest.category != ""
+        ).distinct().limit(limit).all()
+        return [cat[0] for cat in categories if cat[0]]
 
     @strawberry.field
     def search_lab_tests(self, info: Info, query: str = "", limit: int = 20, offset: int = 0) -> List[LabTestType]:
