@@ -129,13 +129,23 @@ def send_customer_otp(payload: SendOtpRequest):
     if phone.startswith("+"):
         phone = phone[1:] # Remove + sign if present
         
-    otp = str(random.randint(100000, 999999))
+    # Demo logic
+    is_demo = False
+    if phone.endswith("9999999999"):
+        otp = "123456"
+        is_demo = True
+    else:
+        otp = str(random.randint(100000, 999999))
     
     otp_store[phone] = {
         "otp": otp,
         "expires_at": datetime.now() + timedelta(minutes=5)
     }
     
+    if is_demo:
+        logger.info(f"Demo OTP used for {phone}: {otp}")
+        return {"status": "success", "message": "OTP sent successfully (demo)"}
+        
     url = f"https://apitxt.com/api/sendOTP?authkey={APITXT_AUTH_KEY}&mobile={phone}&otp={otp}"
     try:
         response = requests.get(url)
