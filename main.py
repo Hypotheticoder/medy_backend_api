@@ -24,6 +24,7 @@ Base.metadata.create_all(bind=engine)
 
 # Initialize FastAPI App
 os.makedirs("uploads", exist_ok=True)
+os.makedirs("uploads/medicines", exist_ok=True)
 app = FastAPI(title="Medy Backend API")
 
 # Mount uploads directory

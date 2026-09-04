@@ -6,6 +6,8 @@ import logging
 import csv
 import io
 import uuid
+import os
+import shutil
 from db import get_db
 from models.medicine import Medicine
 from schemas.medicine import MedicineCreate, MedicineUpdate, MedicineResponse
@@ -197,3 +199,39 @@ async def upload_medicine_csv(file: UploadFile = File(...), db: Session = Depend
         db.rollback()
         logger.error(f"Fatal CSV Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to process CSV: {str(e)}")
+
+@router.post("/{medicine_id}/upload-photo", response_model=MedicineResponse)
+async def upload_medicine_photo(
+    medicine_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload a photo for a specific medicine.
+    """
+    try:
+        medicine = crud.get_medicine(db, medicine_id=medicine_id)
+        if not medicine:
+            raise HTTPException(status_code=404, detail="Medicine not found")
+
+        os.makedirs("uploads/medicines", exist_ok=True)
+        file_ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
+        file_path = f"uploads/medicines/{medicine_id}.{file_ext}"
+
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        image_url = f"/{file_path}"
+        
+        # Update the database record
+        medicine.medicine_photo = image_url
+        db.commit()
+        db.refresh(medicine)
+        
+        return medicine
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to upload medicine photo: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload medicine photo")

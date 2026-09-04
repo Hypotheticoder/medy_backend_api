@@ -41,6 +41,7 @@ class Medicine(Base):
             "pack_form": self.pack_form,
             "pack_size": self.pack_size,
             "medicine_category": self.medicine_category,
+            "medicine_photo": self.medicine_photo,
             "medicine_composition": self.medicine_composition,
             "mrp": self.mrp,
             "discount_percent": self.discount_percent,
