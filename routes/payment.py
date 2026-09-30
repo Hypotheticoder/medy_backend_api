@@ -8,6 +8,7 @@ from schemas.payment_schemas import RazorpayOrderCreate, RazorpayVerifyRequest, 
 from crud.payment import create_payment_record, get_transaction_by_rzp_order_id, mark_payment_successful
 from models.order import Order
 from models.lab_booking import LabBooking
+from models.b2b_purchase_order import B2BPurchaseOrder
 
 router = APIRouter(prefix="/api/payments/razorpay", tags=["Razorpay Payments"])
 
@@ -95,6 +96,12 @@ def verify_payment(payload: RazorpayVerifyRequest, db: Session = Depends(get_db)
                 booking.payment_status = "paid"
                 booking.booking_status = "confirmed"
                 booking.transaction_id = payload.razorpay_payment_id
+        elif internal_id.startswith("PO-"):
+            po = db.query(B2BPurchaseOrder).filter(B2BPurchaseOrder.po_id == internal_id).first()
+            if po:
+                po.payment_status = "paid"
+                if po.po_status == "placed":
+                    po.po_status = "accepted"
                 
         db.commit()
         

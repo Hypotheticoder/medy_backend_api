@@ -4,7 +4,8 @@ from strawberry.types import Info
 from sqlalchemy import or_, func
 
 from graphql_api.types import MedicineType, OrderType, PharmaShopType, CartType
-from graphql_api.types import LabBookingType, LabTestType, LabPackageType, MatchedTestType, MissingTestType, LabUserType, VendorLedgerType, DashboardEarningsType, FeaturedPackageType
+from graphql_api.types import LabBookingType, LabTestType, LabPackageType, MatchedTestType, MissingTestType, LabUserType, VendorLedgerType, DashboardEarningsType, FeaturedPackageType, B2BMedicineType
+from graphql_api.types.b2b_types import DistributorCatalogItemType, B2BPurchaseOrderType
 from graphql_api.types.lab_test import LabInventoryItemType
 
 from models.medicine import Medicine
@@ -15,6 +16,10 @@ from models.lab import LabUser
 from models.lab_test import LabTest
 from models.lab_test_pricing import LabTestPricing
 from models.lab_booking import LabBooking
+from models.distributor_inventory import DistributorInventory
+from models.b2b_purchase_order import B2BPurchaseOrder
+from models.b2b_cart import B2BCart
+from graphql_api.types.b2b_types import B2BCartResponseType
 
 @strawberry.type
 class Query:
@@ -392,3 +397,107 @@ class Query:
             total_orders_completed=len(ledgers),
             recent_transactions=recent_txns
         )
+
+    # ==========================================
+    # B2B SEARCH QUERIES
+    # ==========================================
+    
+    @strawberry.field
+    def get_my_b2b_cart(self, info: Info) -> B2BCartResponseType:
+        db: Session = info.context["db"]
+        shop = info.context.get("shop")
+        if not shop:
+            raise Exception("Unauthorized")
+            
+        cart = db.query(B2BCart).filter(B2BCart.shop_id == shop.shop_id).first()
+        if not cart:
+            return B2BCartResponseType(
+                cart_id="empty",
+                active_distributor_id=None,
+                total_estimated_price=0.0
+            )
+            
+        return B2BCartResponseType(
+            cart_id=cart.cart_id,
+            active_distributor_id=cart.active_distributor_id,
+            total_estimated_price=cart.total_estimated_price
+        )
+
+    @strawberry.field
+    def search_b2b_medicines(self, info: Info, query: str, lat: float, lng: float) -> List[B2BMedicineType]:
+        db = info.context["db"]
+        
+        # Search the master catalog
+        medicines = db.query(Medicine).filter(
+            Medicine.medicine_name.ilike(f"%{query}%")
+        ).limit(20).all()
+
+        # Inject coordinates into the context for the nested resolver
+        info.context["search_lat"] = lat
+        info.context["search_lng"] = lng
+
+        return [
+            B2BMedicineType(
+                medicine_id=med.medicine_id,
+                medicine_name=med.medicine_name,
+                pack_size=med.pack_size,
+                manufacturer=med.manufacturer
+            )
+            for med in medicines
+        ]
+
+    @strawberry.field
+    def get_distributor_catalog(self, info: Info, distributor_id: str, limit: int = 50, offset: int = 0) -> List[DistributorCatalogItemType]:
+        db = info.context["db"]
+        
+        # Join Inventory with the Master Medicine catalog
+        results = db.query(
+            DistributorInventory, 
+            Medicine
+        ).join(
+            Medicine, DistributorInventory.medicine_id == Medicine.medicine_id
+        ).filter(
+            DistributorInventory.distributor_id == distributor_id,
+            DistributorInventory.is_active == True,
+            DistributorInventory.available_stock_boxes > 0
+        ).offset(offset).limit(limit).all()
+
+        return [
+            DistributorCatalogItemType(
+                inventory_id=inv.inventory_id,
+                medicine_id=med.medicine_id,
+                medicine_name=med.medicine_name,
+                pack_size=med.pack_size,
+                manufacturer=med.manufacturer,
+                batch_number=inv.batch_number,
+                ptr=inv.ptr,
+                mrp=inv.mrp,
+                available_stock_boxes=inv.available_stock_boxes,
+                moq=inv.moq
+            )
+            for inv, med in results
+        ]
+
+    @strawberry.field
+    def get_b2b_orders(self, info: Info, shop_id: str) -> List[B2BPurchaseOrderType]:
+        db = info.context["db"]
+        
+        orders = db.query(B2BPurchaseOrder).filter(
+            B2BPurchaseOrder.shop_id == shop_id
+        ).order_by(B2BPurchaseOrder.created_at.desc()).all()
+
+        return [
+            B2BPurchaseOrderType(
+                po_id=order.po_id,
+                subtotal=order.subtotal,
+                total_invoice_amount=order.total_invoice_amount,
+                po_status=order.po_status,
+                payment_terms=order.payment_terms,
+                created_at=order.created_at.isoformat(),
+                # Store raw JSON to be processed by the field resolver
+                items_json=order.items, 
+                # Store the ID to be resolved into the DistributorSummaryType
+                distributor_id=order.distributor_id 
+            )
+            for order in orders
+        ]

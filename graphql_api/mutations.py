@@ -9,6 +9,10 @@ from graphql_api.types.medicine import MedicineType
 from models.cart import Cart
 from models.medicine import Medicine
 from models.customer import CustomerUser
+from models.b2b_cart import B2BCart
+from models.b2b_purchase_order import B2BPurchaseOrder
+from models.distributor_inventory import DistributorInventory
+from graphql_api.types.b2b_types import B2BCartResponseType, B2BPurchaseOrderType
 
 @strawberry.type
 class Mutation:
@@ -225,3 +229,188 @@ class Mutation:
         db.commit()
         db.refresh(medicine)
         return medicine
+
+    # ==========================================
+    # B2B CART AND CHECKOUT MUTATIONS
+    # ==========================================
+
+    @strawberry.mutation
+    def add_to_b2b_cart(self, info: Info, distributor_id: str, inventory_id: str, qty_boxes: int, ptr: float) -> B2BCartResponseType:
+        db = info.context["db"]
+        shop = info.context.get("shop")
+        if not shop:
+            raise Exception("Unauthorized: You must be logged in as a verified pharmacy.")
+
+        cart = db.query(B2BCart).filter(B2BCart.shop_id == shop.shop_id).first()
+        
+        if not cart:
+            cart = B2BCart(shop_id=shop.shop_id)
+            db.add(cart)
+            
+        # The Swiggy Check: Enforce single distributor
+        if cart.active_distributor_id and cart.active_distributor_id != distributor_id:
+            if len(cart.items) > 0:
+                raise Exception("Cart contains items from another distributor. Clear it first.")
+                
+        cart.active_distributor_id = distributor_id
+        
+        import copy
+        from sqlalchemy.orm.attributes import flag_modified
+        items = copy.deepcopy(cart.items) if cart.items else []
+
+        new_item = {
+            "inventory_id": inventory_id,
+            "qty_boxes": qty_boxes,
+            "ptr": ptr,
+            "gst_percentage": 12.0 # Standard pharma slab
+        }
+        
+        items.append(new_item)
+        cart.items = items
+        cart.total_estimated_price += (ptr * qty_boxes)
+        
+        flag_modified(cart, "items")
+        db.commit()
+        db.refresh(cart)
+        
+        return B2BCartResponseType(
+            cart_id=cart.cart_id, 
+            active_distributor_id=cart.active_distributor_id,
+            total_estimated_price=cart.total_estimated_price
+        )
+
+    @strawberry.mutation
+    def checkout_b2b_cart(self, info: Info, payment_terms: str) -> B2BPurchaseOrderType:
+        db: Session = info.context["db"]
+        shop = info.context.get("shop")
+        
+        if not shop:
+            raise Exception("Unauthorized: Retailer login required.")
+            
+        cart = db.query(B2BCart).filter(B2BCart.shop_id == shop.shop_id).first()
+        if not cart or not cart.items:
+            raise Exception("Cannot checkout an empty cart")
+            
+        subtotal = 0.0
+        gst_total = 0.0
+        
+        from sqlalchemy.orm.attributes import flag_modified
+        
+        for item in cart.items:
+            inventory = db.query(DistributorInventory).with_for_update().filter(
+                DistributorInventory.inventory_id == item["inventory_id"]
+            ).first()
+            
+            if not inventory or inventory.available_stock_boxes < item["qty_boxes"]:
+                raise Exception(f"Insufficient stock for batch {item.get('batch_number', 'unknown')}")
+                
+            inventory.available_stock_boxes -= item["qty_boxes"]
+            
+            item_total = item["ptr"] * item["qty_boxes"]
+            subtotal += item_total
+            gst_total += item_total * (item["gst_percentage"] / 100)
+            
+        po = B2BPurchaseOrder(
+            shop_id=shop.shop_id,
+            distributor_id=cart.active_distributor_id,
+            items=cart.items,
+            subtotal=subtotal,
+            cgst_amount=gst_total / 2,
+            sgst_amount=gst_total / 2,
+            total_invoice_amount=subtotal + gst_total,
+            payment_terms=payment_terms
+        )
+        db.add(po)
+        
+        cart.items = []
+        cart.active_distributor_id = None
+        cart.total_estimated_price = 0.0
+        flag_modified(cart, "items")
+        
+        db.commit()
+        db.refresh(po)
+        
+        import asyncio
+        from routes.websockets import redis_manager
+        import json
+
+        async def notify_distributor():
+            await redis_manager.connect()
+            channel = f"distributor_channel_{po.distributor_id}"
+            await redis_manager.redis_client.publish(
+                channel,
+                json.dumps({
+                    "type": "NEW_PURCHASE_ORDER",
+                    "po_id": po.po_id,
+                    "total_amount": po.total_invoice_amount,
+                    "items_count": len(po.items) if isinstance(po.items, list) else 0
+                })
+            )
+
+        asyncio.create_task(notify_distributor())
+        
+        return B2BPurchaseOrderType(
+            po_id=po.po_id,
+            subtotal=po.subtotal,
+            total_invoice_amount=po.total_invoice_amount,
+            po_status=po.po_status,
+            payment_terms=po.payment_terms,
+            created_at=po.created_at.isoformat(),
+            items_json=po.items,
+            distributor_id=po.distributor_id
+        )
+
+    @strawberry.mutation
+    def clear_b2b_cart(self, info: Info) -> B2BCartResponseType:
+        from sqlalchemy.orm.attributes import flag_modified
+        db: Session = info.context["db"]
+        shop = info.context.get("shop")
+        if not shop:
+            raise Exception("Unauthorized")
+            
+        cart = db.query(B2BCart).filter(B2BCart.shop_id == shop.shop_id).first()
+        if cart:
+            cart.items = []
+            cart.active_distributor_id = None
+            cart.total_estimated_price = 0.0
+            flag_modified(cart, "items")
+            db.commit()
+            
+        return B2BCartResponseType(
+            cart_id=cart.cart_id if cart else "empty",
+            active_distributor_id=None,
+            total_estimated_price=0.0
+        )
+        
+    @strawberry.mutation
+    def remove_from_b2b_cart(self, info: Info, inventory_id: str) -> B2BCartResponseType:
+        from sqlalchemy.orm.attributes import flag_modified
+        db: Session = info.context["db"]
+        shop = info.context.get("shop")
+        if not shop:
+            raise Exception("Unauthorized")
+            
+        cart = db.query(B2BCart).filter(B2BCart.shop_id == shop.shop_id).first()
+        if not cart:
+            raise Exception("Cart not found")
+            
+        filtered_items = []
+        for item in cart.items:
+            if item["inventory_id"] != inventory_id:
+                filtered_items.append(item)
+            else:
+                cart.total_estimated_price -= (item["ptr"] * item["qty_boxes"])
+                
+        cart.items = filtered_items
+        if not cart.items:
+            cart.active_distributor_id = None
+            
+        flag_modified(cart, "items")
+        db.commit()
+        db.refresh(cart)
+        
+        return B2BCartResponseType(
+            cart_id=cart.cart_id,
+            active_distributor_id=cart.active_distributor_id,
+            total_estimated_price=cart.total_estimated_price
+        )

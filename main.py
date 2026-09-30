@@ -66,6 +66,18 @@ app.include_router(earnings_router)
 app.include_router(dashboard_analytics_router)
 app.include_router(pharmacy_dashboard_router)
 
+from routes.distributor_admin import router as distributor_admin_router
+app.include_router(distributor_admin_router)
+
+from routes.distributor_auth import router as distributor_auth_router
+app.include_router(distributor_auth_router)
+
+from routes.super_admin_b2b import router as super_admin_b2b_router
+app.include_router(super_admin_b2b_router)
+
+from routes.invoice import router as b2b_invoice_router
+app.include_router(b2b_invoice_router)
+
 # Mount GraphQL Route
 app.include_router(graphql_app, prefix="/graphql")
 

@@ -11,6 +11,10 @@ from .lab_test_pricing import LabTestPricing
 from .payment import PaymentTransaction
 from .vendor_ledger import VendorLedger
 from .advertisement import Advertisement
+from .distributor import DistributorUser
+from .distributor_inventory import DistributorInventory
+from .b2b_cart import B2BCart
+from .b2b_purchase_order import B2BPurchaseOrder
 
 __all__ = [
     "CustomerUser",
@@ -25,5 +29,9 @@ __all__ = [
     "LabTestPricing",
     "PaymentTransaction",
     "VendorLedger",
-    "Advertisement"
+    "Advertisement",
+    "DistributorUser",
+    "DistributorInventory",
+    "B2BCart",
+    "B2BPurchaseOrder"
 ]
