@@ -19,7 +19,7 @@ from models.lab_booking import LabBooking
 from models.distributor_inventory import DistributorInventory
 from models.b2b_purchase_order import B2BPurchaseOrder
 from models.b2b_cart import B2BCart
-from graphql_api.types.b2b_types import B2BCartResponseType
+from graphql_api.types.b2b_types import B2BCartResponseType, NearbyDistributorType
 
 @strawberry.type
 class Query:
@@ -411,17 +411,9 @@ class Query:
             
         cart = db.query(B2BCart).filter(B2BCart.shop_id == shop.shop_id).first()
         if not cart:
-            return B2BCartResponseType(
-                cart_id="empty",
-                active_distributor_id=None,
-                total_estimated_price=0.0
-            )
+            return B2BCartResponseType(cart_id="empty", active_distributor_id=None, total_estimated_price=0.0, items_json=[])
             
-        return B2BCartResponseType(
-            cart_id=cart.cart_id,
-            active_distributor_id=cart.active_distributor_id,
-            total_estimated_price=cart.total_estimated_price
-        )
+        return B2BCartResponseType(cart_id=cart.cart_id, active_distributor_id=cart.active_distributor_id, total_estimated_price=cart.total_estimated_price, items_json=cart.items)
 
     @strawberry.field
     def search_b2b_medicines(self, info: Info, query: str, lat: float, lng: float) -> List[B2BMedicineType]:
@@ -500,4 +492,45 @@ class Query:
                 distributor_id=order.distributor_id 
             )
             for order in orders
+        ]
+
+    @strawberry.field
+    def get_nearby_distributors(self, info: Info, lat: float, lng: float) -> List[NearbyDistributorType]:
+        db = info.context["db"]
+        from sqlalchemy import func
+        from models.distributor import DistributorUser
+        
+        distance = (
+            6371 * func.acos(
+                func.cos(func.radians(lat)) * func.cos(func.radians(DistributorUser.latitude)) *
+                func.cos(func.radians(DistributorUser.longitude) - func.radians(lng)) +
+                func.sin(func.radians(lat)) * func.sin(func.radians(DistributorUser.latitude))
+            )
+        )
+        
+        results = db.query(
+            DistributorUser, distance.label("dist")
+        ).filter(
+            DistributorUser.status == "approved",
+            DistributorUser.is_accepting_orders == True,
+            distance <= 50.0
+        ).order_by(distance.asc()).all()
+        
+        # Fallback if no approved ones exist, for testing/demo
+        if not results:
+            results = db.query(
+                DistributorUser, distance.label("dist")
+            ).filter(
+                distance <= 50.0
+            ).order_by(distance.asc()).all()
+            
+        return [
+            NearbyDistributorType(
+                distributor_id=r[0].distributor_id,
+                company_name=r[0].company_name,
+                phone=r[0].phone,
+                address=r[0].address,
+                distance_km=float(r[1] or 0.0)
+            )
+            for r in results
         ]

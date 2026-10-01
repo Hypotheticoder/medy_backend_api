@@ -50,10 +50,10 @@ class B2BPurchaseOrderType:
     def items(self) -> List[B2BOrderItemType]:
         return [
             B2BOrderItemType(
-                medicine_id=item["medicine_id"],
-                batch_number=item["batch_number"],
-                qty_boxes=item["qty_boxes"],
-                ptr=item["ptr"]
+                medicine_id=item.get("medicine_id", "unknown_medicine"),
+                batch_number=item.get("batch_number", "N/A"),
+                qty_boxes=item.get("qty_boxes", 0),
+                ptr=item.get("ptr", 0.0)
             )
             for item in self.items_json
         ]
@@ -70,7 +70,58 @@ class B2BPurchaseOrderType:
         )
 
 @strawberry.type
+class B2BCartItemType:
+    inventory_id: str
+    qty_boxes: int
+    ptr: float
+    gst_percentage: float
+
+    @strawberry.field
+    def medicine_name(self, info: strawberry.Info) -> str:
+        db = info.context["db"]
+        from models.distributor_inventory import DistributorInventory
+        from models.medicine import Medicine
+        inv = db.query(DistributorInventory).filter(DistributorInventory.inventory_id == self.inventory_id).first()
+        if inv:
+            med = db.query(Medicine).filter(Medicine.medicine_id == inv.medicine_id).first()
+            if med:
+                return med.medicine_name
+        return "Unknown Medicine"
+
+    @strawberry.field
+    def moq(self, info: strawberry.Info) -> int:
+        db = info.context["db"]
+        from models.distributor_inventory import DistributorInventory
+        inv = db.query(DistributorInventory).filter(DistributorInventory.inventory_id == self.inventory_id).first()
+        return inv.moq if inv else 1
+
+
+@strawberry.type
 class B2BCartResponseType:
     cart_id: str
     active_distributor_id: Optional[str]
     total_estimated_price: float
+    items_json: strawberry.Private[list]
+    
+    @strawberry.field
+    def items(self) -> List[B2BCartItemType]:
+        if not self.items_json:
+            return []
+        return [
+            B2BCartItemType(
+                inventory_id=item.get("inventory_id", ""),
+                qty_boxes=item.get("qty_boxes", 0),
+                ptr=item.get("ptr", 0.0),
+                gst_percentage=item.get("gst_percentage", 12.0)
+            )
+            for item in self.items_json
+        ]
+
+
+@strawberry.type
+class NearbyDistributorType:
+    distributor_id: str
+    company_name: str
+    phone: str
+    address: str
+    distance_km: float

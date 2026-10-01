@@ -267,6 +267,10 @@ class Mutation:
         
         items.append(new_item)
         cart.items = items
+        
+        if cart.total_estimated_price is None:
+            cart.total_estimated_price = 0.0
+            
         cart.total_estimated_price += (ptr * qty_boxes)
         
         flag_modified(cart, "items")
@@ -276,7 +280,8 @@ class Mutation:
         return B2BCartResponseType(
             cart_id=cart.cart_id, 
             active_distributor_id=cart.active_distributor_id,
-            total_estimated_price=cart.total_estimated_price
+            total_estimated_price=cart.total_estimated_price,
+            items_json=cart.items
         )
 
     @strawberry.mutation
@@ -305,6 +310,8 @@ class Mutation:
                 raise Exception(f"Insufficient stock for batch {item.get('batch_number', 'unknown')}")
                 
             inventory.available_stock_boxes -= item["qty_boxes"]
+            item["medicine_id"] = inventory.medicine_id
+            item["batch_number"] = inventory.batch_number
             
             item_total = item["ptr"] * item["qty_boxes"]
             subtotal += item_total
@@ -379,9 +386,43 @@ class Mutation:
         return B2BCartResponseType(
             cart_id=cart.cart_id if cart else "empty",
             active_distributor_id=None,
-            total_estimated_price=0.0
+            total_estimated_price=0.0,
+            items_json=[]
         )
         
+
+    @strawberry.mutation
+    def update_b2b_cart_qty(self, info: Info, inventory_id: str, new_qty: int) -> B2BCartResponseType:
+        from sqlalchemy.orm.attributes import flag_modified
+        db: Session = info.context["db"]
+        shop = info.context.get("shop")
+        if not shop:
+            raise Exception("Unauthorized")
+            
+        cart = db.query(B2BCart).filter(B2BCart.shop_id == shop.shop_id).first()
+        if not cart:
+            raise Exception("Cart not found")
+            
+        if new_qty <= 0:
+            return self.remove_from_b2b_cart(info, inventory_id)
+            
+        updated = False
+        new_total = 0.0
+        for item in cart.items:
+            if item["inventory_id"] == inventory_id:
+                item["qty_boxes"] = new_qty
+                updated = True
+            new_total += (item["ptr"] * item["qty_boxes"])
+            
+        if not updated:
+            raise Exception("Item not in cart")
+            
+        cart.total_estimated_price = new_total
+        flag_modified(cart, "items")
+        db.commit()
+        db.refresh(cart)
+        return B2BCartResponseType(cart_id=cart.cart_id, active_distributor_id=cart.active_distributor_id, total_estimated_price=cart.total_estimated_price, items_json=cart.items)
+
     @strawberry.mutation
     def remove_from_b2b_cart(self, info: Info, inventory_id: str) -> B2BCartResponseType:
         from sqlalchemy.orm.attributes import flag_modified
@@ -409,8 +450,4 @@ class Mutation:
         db.commit()
         db.refresh(cart)
         
-        return B2BCartResponseType(
-            cart_id=cart.cart_id,
-            active_distributor_id=cart.active_distributor_id,
-            total_estimated_price=cart.total_estimated_price
-        )
+        return B2BCartResponseType(cart_id=cart.cart_id, active_distributor_id=cart.active_distributor_id, total_estimated_price=cart.total_estimated_price, items_json=cart.items)
