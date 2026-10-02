@@ -14,3 +14,14 @@ class PharmaShopType:
     is_verified: bool
     is_accepting_orders: bool
     rating: float
+    phone: str
+    whatsapp_number: Optional[str]
+    license_number: str
+    gstin_no: Optional[str]
+    drug_license_upload: Optional[str]
+    pan_card_upload: Optional[str]
+    registration_certificate_upload: Optional[str]
+    bank_account_no: Optional[str]
+    bank_ifsc_code: Optional[str]
+    bank_name: Optional[str]
+    status: str

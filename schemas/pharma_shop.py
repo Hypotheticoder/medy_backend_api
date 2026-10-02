@@ -13,6 +13,12 @@ class PharmaShopBase(BaseModel):
     longitude: float
     license_number: str
     is_verified: bool = False
+    whatsapp_number: Optional[str] = None
+    shop_alternative_phone_no: Optional[str] = None
+    gstin_no: Optional[str] = None
+    bank_account_no: Optional[str] = None
+    bank_ifsc_code: Optional[str] = None
+    bank_name: Optional[str] = None
     is_accepting_orders: bool = True
     rating: float = 5.0
     shop_alternative_phone_no: Optional[str] = None

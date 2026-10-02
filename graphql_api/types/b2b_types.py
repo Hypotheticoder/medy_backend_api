@@ -125,3 +125,10 @@ class NearbyDistributorType:
     phone: str
     address: str
     distance_km: float
+
+@strawberry.type
+class B2BRazorpayOrderType:
+    razorpay_order_id: str
+    amount_in_paise: int
+    currency: str
+    key_id: str

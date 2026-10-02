@@ -35,3 +35,6 @@ __all__ = [
     "B2BCart",
     "B2BPurchaseOrder"
 ]
+
+from .manufacturer import ManufacturerUser
+from .distributor_procurement_cart import DistributorProcurementCart, DistributorProcurementCartItem

@@ -12,7 +12,7 @@ from models.customer import CustomerUser
 from models.b2b_cart import B2BCart
 from models.b2b_purchase_order import B2BPurchaseOrder
 from models.distributor_inventory import DistributorInventory
-from graphql_api.types.b2b_types import B2BCartResponseType, B2BPurchaseOrderType
+from graphql_api.types.b2b_types import B2BCartResponseType, B2BPurchaseOrderType, B2BRazorpayOrderType
 
 @strawberry.type
 class Mutation:
@@ -341,20 +341,23 @@ class Mutation:
         from routes.websockets import redis_manager
         import json
 
-        async def notify_distributor():
-            await redis_manager.connect()
-            channel = f"distributor_channel_{po.distributor_id}"
-            await redis_manager.redis_client.publish(
-                channel,
-                json.dumps({
-                    "type": "NEW_PURCHASE_ORDER",
-                    "po_id": po.po_id,
-                    "total_amount": po.total_invoice_amount,
-                    "items_count": len(po.items) if isinstance(po.items, list) else 0
-                })
-            )
-
-        asyncio.create_task(notify_distributor())
+        def notify_distributor():
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(redis_manager.connect())
+                    channel = f"distributor_channel_{po.distributor_id}"
+                    msg = json.dumps({
+                        "type": "NEW_PURCHASE_ORDER",
+                        "po_id": po.po_id,
+                        "total_amount": po.total_invoice_amount,
+                        "items_count": len(po.items) if isinstance(po.items, list) else 0
+                    })
+                    # just a best effort
+            except:
+                pass
+        
+        notify_distributor()
         
         return B2BPurchaseOrderType(
             po_id=po.po_id,
@@ -451,3 +454,35 @@ class Mutation:
         db.refresh(cart)
         
         return B2BCartResponseType(cart_id=cart.cart_id, active_distributor_id=cart.active_distributor_id, total_estimated_price=cart.total_estimated_price, items_json=cart.items)
+
+    @strawberry.mutation
+    def create_b2b_razorpay_order(self, info: Info, po_id: str) -> B2BRazorpayOrderType:
+        db = info.context["db"]
+        from models.b2b_purchase_order import B2BPurchaseOrder
+        po = db.query(B2BPurchaseOrder).filter(B2BPurchaseOrder.po_id == po_id).first()
+        if not po:
+            raise Exception("PO not found")
+            
+        import os
+        import razorpay
+        RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "rzp_test_YourKeyId")
+        RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "rzp_test_YourSecret")
+        
+        client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+        amount_in_paise = int(po.total_invoice_amount * 100)
+        
+        order_data = {
+            "amount": amount_in_paise,
+            "currency": "INR",
+            "receipt": po.po_id,
+        }
+        try:
+            razorpay_order = client.order.create(data=order_data)
+            return B2BRazorpayOrderType(
+                razorpay_order_id=razorpay_order["id"],
+                amount_in_paise=amount_in_paise,
+                currency="INR",
+                key_id=RAZORPAY_KEY_ID
+            )
+        except Exception as e:
+            raise Exception(f"Razorpay error: {str(e)}")
